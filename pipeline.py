@@ -29,12 +29,14 @@ class MLLMSAMPipeline:
 
     def __init__(self):
         Config.setup_dirs()
-        
+        self._log_runtime_profile()
+
         # 初始化组件
         print("初始化组件...")
         self.mllm = MLLMProcessor()
         self.sam = SAMProcessor()
         self.locator = ObjectLocator(self.mllm)
+        self._run_startup_healthchecks()
         self.concept_gen = ConceptGenerator(self.mllm)
         self.enhancer = ImageEnhancer()
         
@@ -52,6 +54,39 @@ class MLLMSAMPipeline:
         }
         
         print("初始化完成")
+
+    def _log_runtime_profile(self):
+        print("运行配置摘要:")
+        for key, value in Config.runtime_profile_summary().items():
+            print(f"  - {key}: {value}")
+
+    def _run_startup_healthchecks(self):
+        if not Config.TRAIN_ADAPTER_STARTUP_HEALTHCHECK:
+            print("TrainAdapter startup health check disabled")
+            return
+
+        status = self.locator.check_service_health()
+        if status.get("skipped"):
+            print(f"TrainAdapter startup check skipped: {status.get('reason')}")
+            return
+
+        if not status.get("ok"):
+            print(
+                "TrainAdapter startup check failed: "
+                f"{status.get('error')} (kind={status.get('error_kind', 'unknown')})"
+            )
+            return
+
+        device = status.get("device", "unknown")
+        elapsed_ms = status.get("elapsed_ms")
+        device_suffix = f", latency={elapsed_ms:.2f} ms" if isinstance(elapsed_ms, (float, int)) else ""
+        print(f"TrainAdapter startup check passed: device={device}{device_suffix}")
+
+        if "device_matches_expected" in status and not status["device_matches_expected"]:
+            print(
+                "TrainAdapter device mismatch: "
+                f"expected {status.get('expected_device')}, got {device}"
+            )
 
     def get_color(self, index):
         return self.COLORS[index % len(self.COLORS)]

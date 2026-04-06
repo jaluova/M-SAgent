@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M-SAgent 项目逻辑演示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0f1923;
+    color: #e0e6ed;
+    line-height: 1.8;
+    overflow-x: hidden;
+  }
+
+  /* ===== 顶部 Hero ===== */
+  .hero {
+    text-align: center;
+    padding: 60px 20px 40px;
+    background: linear-gradient(135deg, #1a2a3a 0%, #0f1923 100%);
+  }
+  .hero h1 {
+    font-size: 2.6em;
+    background: linear-gradient(90deg, #4fc3f7, #81d4fa, #b3e5fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle {
+    font-size: 1.15em;
+    color: #90a4ae;
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  /* ===== 通用 Section ===== */
+  section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 50px 24px;
+  }
+  section h2 {
+    font-size: 1.7em;
+    color: #4fc3f7;
+    margin-bottom: 20px;
+    border-left: 4px solid #4fc3f7;
+    padding-left: 14px;
+  }
+  .card {
+    background: #1a2a3a;
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 24px;
+    border: 1px solid #263545;
+    transition: transform .2s;
+  }
+  .card:hover { transform: translateY(-3px); }
+  .card h3 { color: #81d4fa; margin-bottom: 10px; font-size: 1.2em; }
+  .card p  { color: #b0bec5; }
+
+  /* ===== 一句话总结 ===== */
+  .tldr {
+    background: linear-gradient(135deg, #1b3a4b, #1a2a3a);
+    border: 2px solid #4fc3f7;
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+    margin: 0 auto 30px;
+    max-width: 900px;
+  }
+  .tldr p {
+    font-size: 1.25em;
+    color: #e0f7fa;
+  }
+  .tldr strong { color: #4fc3f7; }
+
+  /* ===== 架构图 ===== */
+  .arch-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 20px 0;
+  }
+  .arch-box {
+    background: #1a2a3a;
+    border: 2px solid #4fc3f7;
+    border-radius: 14px;
+    padding: 18px 32px;
+    text-align: center;
+    width: 340px;
+    position: relative;
+  }
+  .arch-box .label { font-size: .85em; color: #90a4ae; }
+  .arch-box .name  { font-size: 1.2em; color: #fff; font-weight: 700; }
+  .arch-box .desc  { font-size: .9em; color: #b0bec5; margin-top: 4px; }
+  .arch-arrow {
+    font-size: 1.8em;
+    color: #4fc3f7;
+    line-height: 1;
+    padding: 4px 0;
+  }
+
+  /* ===== 流程图 ===== */
+  .flow-container {
+    position: relative;
+    padding: 30px 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .flow-step:last-child .flow-line { display: none; }
+
+  .flow-number {
+    min-width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3em;
+    font-weight: 700;
+    color: #fff;
+    position: relative;
+    z-index: 2;
+    flex-shrink: 0;
+  }
+  .flow-line {
+    position: absolute;
+    left: 25px;
+    top: 52px;
+    width: 3px;
+    height: calc(100% - 10px);
+    z-index: 1;
+  }
+
+  .flow-content {
+    background: #1a2a3a;
+    border-radius: 12px;
+    padding: 20px 24px;
+    flex: 1;
+    border: 1px solid #263545;
+    margin-bottom: 20px;
+  }
+  .flow-content h3 { color: #fff; margin-bottom: 6px; font-size: 1.1em; }
+  .flow-content p  { color: #b0bec5; font-size: .95em; }
+
+  /* 步骤颜色主题 */
+  .step-load  .flow-number { background: #2196f3; }
+  .step-load  .flow-line   { background: linear-gradient(#2196f3, #ff9800); }
+  .step-mllm  .flow-number { background: #ff9800; }
+  .step-mllm  .flow-line   { background: linear-gradient(#ff9800, #9c27b0); }
+  .step-tool  .flow-number { background: #9c27b0; }
+  .step-tool  .flow-line   { background: linear-gradient(#9c27b0, #4caf50); }
+  .step-sam   .flow-number { background: #4caf50; }
+  .step-sam   .flow-line   { background: linear-gradient(#4caf50, #f44336); }
+  .step-eval  .flow-number { background: #f44336; }
+  .step-eval  .flow-line   { background: linear-gradient(#f44336, #00bcd4); }
+  .step-loop  .flow-number { background: #00bcd4; }
+  .step-loop  .flow-line   { background: linear-gradient(#00bcd4, #8bc34a); }
+  .step-out   .flow-number { background: #8bc34a; }
+
+  /* ===== 工具卡片网格 ===== */
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  .tool-card {
+    background: #1a2a3a;
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid #263545;
+    transition: transform .2s, border-color .3s;
+  }
+  .tool-card:hover { transform: translateY(-4px); border-color: #4fc3f7; }
+  .tool-icon {
+    font-size: 2.2em;
+    margin-bottom: 10px;
+  }
+  .tool-card h3 { color: #81d4fa; margin-bottom: 8px; }
+  .tool-card p  { color: #b0bec5; font-size: .93em; }
+  .tool-card .tag {
+    display: inline-block;
+    background: #263545;
+    color: #4fc3f7;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: .8em;
+    margin-top: 10px;
+  }
+
+  /* ===== 模型卡片 ===== */
+  .models-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .model-card {
+    background: #1a2a3a;
+    border-radius: 14px;
+    padding: 28px;
+    border: 1px solid #263545;
+    text-align: center;
+  }
+  .model-card .model-icon { font-size: 3em; margin-bottom: 10px; }
+  .model-card h3 { color: #fff; font-size: 1.3em; }
+  .model-card .model-role { color: #90a4ae; margin: 6px 0 12px; }
+  .model-card ul { list-style: none; text-align: left; }
+  .model-card li { padding: 4px 0; color: #b0bec5; }
+  .model-card li::before { content: "  "; color: #4fc3f7; margin-right: 8px; }
+
+  /* ===== 交互演示 ===== */
+  .demo-area {
+    background: #1a2a3a;
+    border-radius: 14px;
+    padding: 32px;
+    border: 1px solid #263545;
+  }
+  .demo-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .demo-btn {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 8px;
+    font-size: .95em;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all .2s;
+    color: #fff;
+  }
+  .demo-btn:hover { filter: brightness(1.2); transform: scale(1.04); }
+  .demo-btn.start   { background: #4caf50; }
+  .demo-btn.reset   { background: #78909c; }
+  .demo-btn.next    { background: #ff9800; }
+
+  .demo-log {
+    background: #0d1b2a;
+    border-radius: 10px;
+    padding: 20px;
+    min-height: 380px;
+    max-height: 520px;
+    overflow-y: auto;
+    font-family: "Fira Code", "Cascadia Code", monospace;
+    font-size: .88em;
+    line-height: 1.9;
+  }
+  .demo-log .log-line {
+    padding: 2px 0;
+    opacity: 0;
+    animation: fadeIn .4s forwards;
+  }
+  @keyframes fadeIn { to { opacity: 1; } }
+  .log-sys   { color: #78909c; }
+  .log-info  { color: #4fc3f7; }
+  .log-mllm  { color: #ff9800; }
+  .log-tool  { color: #ce93d8; }
+  .log-sam   { color: #81c784; }
+  .log-eval  { color: #ef5350; }
+  .log-ok    { color: #66bb6a; }
+  .log-dim   { color: #546e7a; }
+
+  /* ===== 比喻区 ===== */
+  .analogy {
+    background: linear-gradient(135deg, #263545, #1a2a3a);
+    border-radius: 16px;
+    padding: 36px;
+    border: 1px solid #37474f;
+    margin-top: 20px;
+  }
+  .analogy h3 { color: #ffcc80; font-size: 1.3em; margin-bottom: 14px; }
+  .analogy-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .analogy-left  { text-align: right; color: #ffcc80; font-weight: 600; }
+  .analogy-eq    { color: #546e7a; font-size: 1.4em; }
+  .analogy-right { color: #b0bec5; }
+
+  /* ===== 循环亮点 ===== */
+  .loop-highlight {
+    background: #1b3a4b;
+    border-left: 4px solid #ff9800;
+    border-radius: 0 12px 12px 0;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  .loop-highlight p { color: #ffe0b2; }
+
+  /* ===== Footer ===== */
+  footer {
+    text-align: center;
+    padding: 40px 20px;
+    color: #546e7a;
+    font-size: .9em;
+  }
+
+  /* ===== 响应式 ===== */
+  @media (max-width: 700px) {
+    .hero h1 { font-size: 1.8em; }
+    .models-row { grid-template-columns: 1fr; }
+    .tools-grid { grid-template-columns: 1fr; }
+    .analogy-row { grid-template-columns: 1fr; text-align: left; }
+    .analogy-eq  { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- =============== HERO =============== -->
+<div class="hero">
+  <h1>M-SAgent</h1>
+  <p class="subtitle">
+    MLLM + SAM3 智能图像分割系统 —— 让 AI "看懂你说的"，然后精准把它框出来
+  </p>
+</div>
+
+<!-- =============== 一句话总结 =============== -->
+<section>
+  <div class="tldr">
+    <p>
+      你给一张图片，说一句话（比如 <strong>"穿红衣服的女孩"</strong>），<br>
+      系统自动理解你的意思，在图片里<strong>精准找到并标出</strong>对应的区域。
+    </p>
+  </div>
+</section>
+
+<!-- =============== 生活化比喻 =============== -->
+<section>
+  <h2>先用一个比喻理解</h2>
+  <div class="analogy">
+    <h3>想象你在指挥一个「找东西团队」</h3>
+    <div class="analogy-row">
+      <div class="analogy-left">你（用户）</div>
+      <div class="analogy-eq">=</div>
+      <div class="analogy-right">下达指令的人："帮我找到图里的卡车"</div>
+    </div>
+    <div class="analogy-row">
+      <div class="analogy-left">MLLM（大脑）</div>
+      <div class="analogy-eq">=</div>
+      <div class="analogy-right">一个<b>很聪明的指挥官</b>，看得懂图片也听得懂你说的话，负责制定策略</div>
+    </div>
+    <div class="analogy-row">
+      <div class="analogy-left">SAM3（手）</div>
+      <div class="analogy-eq">=</div>
+      <div class="analogy-right">一个<b>分割专家</b>，指挥官告诉它去哪里，它就精准地把那块区域"抠"出来</div>
+    </div>
+    <div class="analogy-row">
+      <div class="analogy-left">工具箱</div>
+      <div class="analogy-eq">=</div>
+      <div class="analogy-right">指挥官手里有好几种策略（用概念搜索、用坐标点定位、放大局部看细节）</div>
+    </div>
+    <div class="analogy-row">
+      <div class="analogy-left">评估环节</div>
+      <div class="analogy-eq">=</div>
+      <div class="analogy-right">指挥官做完后自己检查一遍：找对了没？没找对就<b>再来一轮</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- =============== 两大核心模型 =============== -->
+<section>
+  <h2>两大核心模型</h2>
+  <div class="models-row">
+    <div class="model-card">
+      <div class="model-icon">&#x1F9E0;</div>
+      <h3>Qwen2.5-VL (MLLM)</h3>
+      <p class="model-role">多模态大语言模型 —— "大脑"</p>
+      <ul>
+        <li>能同时"看"图片 + "读"文字</li>
+        <li>理解用户的自然语言描述</li>
+        <li>分析图像内容，做出策略决策</li>
+        <li>选择使用哪个工具、传什么参数</li>
+        <li>最后还负责评估结果好不好</li>
+      </ul>
+    </div>
+    <div class="model-card">
+      <div class="model-icon">&#x2702;&#xFE0F;</div>
+      <h3>SAM3</h3>
+      <p class="model-role">分割大模型 —— "手"</p>
+      <ul>
+        <li>专门做图像分割（把目标"抠"出来）</li>
+        <li>支持文本提示：给一个词，分割对应物体</li>
+        <li>支持点提示：给几个坐标点，分割该区域</li>
+        <li>输出 Mask（蒙版）+ 置信度分数</li>
+        <li>运行在 GPU 上，平时存在 CPU 省显存</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- =============== 系统架构 =============== -->
+<section>
+  <h2>系统架构总览</h2>
+  <div class="arch-diagram">
+    <div class="arch-box">
+      <div class="label">入口</div>
+      <div class="name">main.py</div>
+      <div class="desc">接收命令行参数（图片路径 + 文字描述）</div>
+    </div>
+    <div class="arch-arrow">&#x25BC;</div>
+    <div class="arch-box">
+      <div class="label">核心管道</div>
+      <div class="name">Pipeline</div>
+      <div class="desc">串联所有组件，管理迭代循环</div>
+    </div>
+    <div class="arch-arrow">&#x25BC;</div>
+    <div class="arch-box" style="display: flex; gap: 20px; width: auto; justify-content: center; flex-wrap: wrap;">
+      <div>
+        <div class="label">大脑</div>
+        <div class="name">MLLMProcessor</div>
+        <div class="desc">Qwen2.5-VL</div>
+      </div>
+      <div style="color:#4fc3f7; align-self:center; font-size:1.5em;">+</div>
+      <div>
+        <div class="label">手</div>
+        <div class="name">SAMProcessor</div>
+        <div class="desc">SAM3</div>
+      </div>
+    </div>
+    <div class="arch-arrow">&#x25BC;</div>
+    <div class="arch-box" style="width: auto; min-width: 340px;">
+      <div class="label">工具箱（由 MLLM 选择调用）</div>
+      <div class="name" style="font-size:1em;">ConceptGenerator &nbsp;|&nbsp; ObjectLocator &nbsp;|&nbsp; ImageEnhancer</div>
+    </div>
+    <div class="arch-arrow">&#x25BC;</div>
+    <div class="arch-box">
+      <div class="label">输出</div>
+      <div class="name">最终分割结果</div>
+      <div class="desc">带 Mask 的图片 + Mask 文件 (.npy)</div>
+    </div>
+  </div>
+</section>
+
+<!-- =============== 三大工具详解 =============== -->
+<section>
+  <h2>三大工具详解</h2>
+  <p style="color:#90a4ae; margin-bottom:20px;">
+    MLLM 分析图片后，会选择最合适的工具来执行分割。每个工具有不同的策略：
+  </p>
+  <div class="tools-grid">
+    <div class="tool-card">
+      <div class="tool-icon">&#x1F4A1;</div>
+      <h3>ConceptGenerator</h3>
+      <p>
+        <b>概念生成器</b> —— 把你说的话拆成多个"关键词概念"。<br><br>
+        比如你说"穿红衣服的女孩"，它可能生成 <code>"red jersey"</code>、<code>"girl"</code>、<code>"red clothing"</code> 等概念，
+        然后<b>逐个</b>让 SAM3 用每个概念进行文本分割，最后选分数最高的那个。
+      </p>
+      <span class="tag">文本提示分割</span>
+    </div>
+    <div class="tool-card">
+      <div class="tool-icon">&#x1F4CD;</div>
+      <h3>ObjectLocator</h3>
+      <p>
+        <b>目标定位器</b> —— 在图片上标出"点"来告诉 SAM3 去哪里切割。<br><br>
+        MLLM 看带网格的图片，选出目标所在的<b>网格坐标</b>，
+        转换成像素坐标后作为"点提示"给 SAM3。<br>
+        还会优先尝试 TrainAdapter 服务获取更准确的定位。
+      </p>
+      <span class="tag">点提示分割</span>
+    </div>
+    <div class="tool-card">
+      <div class="tool-icon">&#x1F50D;</div>
+      <h3>ImageEnhancer</h3>
+      <p>
+        <b>图像增强器</b> —— 目标太小看不清？先放大再分割！<br><br>
+        MLLM 指定图片中某个<b>矩形区域</b>（网格坐标），
+        系统把这块区域裁剪出来并放大到 1024px，
+        SAM3 在放大图上分割，最后再把 Mask <b>缩小还原</b>到原图坐标。
+      </p>
+      <span class="tag">局部放大 + 还原</span>
+    </div>
+    <div class="tool-card">
+      <div class="tool-icon">&#x274C;</div>
+      <h3>report_no_mask</h3>
+      <p>
+        <b>放弃报告</b> —— 如果 MLLM 认为图片中根本没有你描述的东西，
+        就直接报告"未找到匹配内容"，结束流程。
+      </p>
+      <span class="tag">终止信号</span>
+    </div>
+  </div>
+</section>
+
+<!-- =============== 完整流程（步骤） =============== -->
+<section>
+  <h2>完整工作流程</h2>
+  <div class="flow-container">
+
+    <!-- Step 1 -->
+    <div class="flow-step step-load">
+      <div class="flow-number">1</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>加载图片 + 预处理</h3>
+        <p>
+          读取你给的图片，转成 RGB 格式，缩放到最大 1024px。<br>
+          同时给图片画上 <b>5x5 网格</b>（带坐标数字），方便 MLLM 精准描述位置。
+        </p>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="flow-step step-mllm">
+      <div class="flow-number">2</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>MLLM 分析 + 决策</h3>
+        <p>
+          把<b>原图</b>和<b>带网格的图</b>一起发给 Qwen2.5-VL，连同你的文字描述。<br>
+          MLLM 会按 4 步思考：<br>
+          &nbsp;&nbsp;1. 分析图片内容<br>
+          &nbsp;&nbsp;2. 思考要找什么<br>
+          &nbsp;&nbsp;3. 复习工具规则<br>
+          &nbsp;&nbsp;4. 选择工具 + 参数<br>
+          输出格式：<code>&lt;tool&gt;{"name": "xxx", "parameters": {...}}&lt;/tool&gt;</code>
+        </p>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="flow-step step-tool">
+      <div class="flow-number">3</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>执行工具（三选一）</h3>
+        <p>
+          根据 MLLM 的选择，调用对应的工具：<br>
+          <b>concept_generator</b> &rarr; 生成多个概念词 &rarr; SAM3 文本分割<br>
+          <b>object_locator</b> &rarr; 定位坐标点 &rarr; SAM3 点分割<br>
+          <b>image_enhancer</b> &rarr; 裁剪放大 &rarr; SAM3 分割 &rarr; Mask 还原
+        </p>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="flow-step step-sam">
+      <div class="flow-number">4</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>SAM3 分割 + 生成 Mask</h3>
+        <p>
+          SAM3 从 CPU 移到 GPU，执行分割，输出多个候选 Mask 和置信度分数。<br>
+          选出<b>分数最高</b>的那个 Mask，叠加到原图上生成可视化检查图。
+        </p>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="flow-step step-eval">
+      <div class="flow-number">5</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>MLLM 评估结果</h3>
+        <p>
+          把<b>原图</b>和<b>叠加了 Mask 的图</b>再次发给 MLLM。<br>
+          MLLM 判断：这个分割结果对不对？<br>
+          输出 <code>&lt;verdict&gt;Accept&lt;/verdict&gt;</code> 或 <code>&lt;verdict&gt;Reject&lt;/verdict&gt;</code><br>
+          如果 Reject，还会指出哪些 Mask 该删掉。
+        </p>
+      </div>
+    </div>
+
+    <!-- Step 6 -->
+    <div class="flow-step step-loop">
+      <div class="flow-number">6</div>
+      <div class="flow-line"></div>
+      <div class="flow-content">
+        <h3>循环还是结束？</h3>
+        <div class="loop-highlight">
+          <p>
+            <b>Accept</b> &rarr; 保留所有 Mask，流程结束<br>
+            <b>Reject</b> &rarr; 删掉不好的 Mask，回到第 2 步，MLLM 重新决策<br>
+            最多循环 <b>5 次</b>（可配置）
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 7 -->
+    <div class="flow-step step-out">
+      <div class="flow-number">7</div>
+      <div class="flow-content">
+        <h3>输出最终结果</h3>
+        <p>
+          把所有被接受的 Mask 合成到原图上（不带编号），保存为 JPG。<br>
+          同时保存 Mask 的 numpy 数组 (.npy)，方便后续程序使用。
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- =============== 交互式演示 =============== -->
+<section>
+  <h2>交互式流程演示</h2>
+  <p style="color:#90a4ae; margin-bottom:16px;">
+    点击下方按钮，模拟一次完整的分割流程：
+  </p>
+  <div class="demo-area">
+    <div class="demo-controls">
+      <button class="demo-btn start" onclick="startDemo()">&#x25B6; 开始演示</button>
+      <button class="demo-btn next" onclick="nextStep()" id="btnNext" disabled>&#x25B6;&#x25B6; 下一步</button>
+      <button class="demo-btn reset" onclick="resetDemo()">&#x21BA; 重置</button>
+    </div>
+    <div class="demo-log" id="demoLog"></div>
+  </div>
+</section>
+
+<!-- =============== 关键设计亮点 =============== -->
+<section>
+  <h2>关键设计亮点</h2>
+  <div class="tools-grid">
+    <div class="card">
+      <h3>Agent 式循环</h3>
+      <p>MLLM 不是跑一次就结束，而是像一个 Agent 一样<b>持续决策 &rarr; 执行 &rarr; 评估 &rarr; 调整</b>，直到满意为止。最多 5 轮迭代。</p>
+    </div>
+    <div class="card">
+      <h3>高分辨率策略</h3>
+      <p>图片太小？自动放大到 300 万像素以上再给 MLLM 看，确保 MLLM 看得清细节。所有尺寸对齐到 28 的倍数（Qwen2.5-VL 要求）。</p>
+    </div>
+    <div class="card">
+      <h3>GPU 显存管理</h3>
+      <p>SAM3 平时存在 CPU，需要分割时才移到 GPU，用完立刻释放。避免和 MLLM 抢显存。</p>
+    </div>
+    <div class="card">
+      <h3>多源定位（TrainAdapter）</h3>
+      <p>ObjectLocator 优先通过 TrainAdapter 外部服务定位目标。如果服务不可用或置信度低，才回退到 MLLM 的网格坐标方案。</p>
+    </div>
+    <div class="card">
+      <h3>Mask 累积与筛选</h3>
+      <p>每轮新 Mask 会和之前已接受的 Mask 合并展示。MLLM 评估时可以选择性拒绝其中某些编号的 Mask，实现精细控制。</p>
+    </div>
+    <div class="card">
+      <h3>完整中间记录</h3>
+      <p>每个工具调用的中间结果（裁剪图、点可视化、Mask 叠加图、元数据 JSON）全部保存到 tool_calls_log，方便调试和复盘。</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============== 文件地图 =============== -->
+<section>
+  <h2>文件结构速查</h2>
+  <div class="card" style="font-family: 'Fira Code', monospace; font-size: .92em; line-height: 2;">
+    <span style="color:#4fc3f7;">main.py</span> .................. 程序入口，解析命令行参数<br>
+    <span style="color:#4fc3f7;">config.py</span> ................. 全局配置（路径、阈值、设备等）<br>
+    <span style="color:#4fc3f7;">pipeline.py</span> ............... 核心管道：串联 MLLM + 工具 + SAM3 的迭代循环<br>
+    <span style="color:#4fc3f7;">mllm_processor.py</span> ......... Qwen2.5-VL 封装（决策 + 评估）<br>
+    <span style="color:#4fc3f7;">sam_processor.py</span> .......... SAM3 封装（文本分割 / 点分割 / 可视化）<br>
+    <span style="color:#4fc3f7;">tools/</span><br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">concept_generator.py</span> .... 概念生成 &rarr; 文本分割<br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">object_locator.py</span> ...... 目标定位 &rarr; 点分割<br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">image_enhancer.py</span> ...... 局部放大 &rarr; 分割 &rarr; 还原<br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">train_adapter_client.py</span>  外部定位服务客户端<br>
+    <span style="color:#4fc3f7;">utils/</span><br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">image_utils.py</span> ......... 网格绘制、智能缩放、RGB 转换<br>
+    &nbsp;&nbsp;<span style="color:#81d4fa;">localization.py</span> ........ 定位结果数据结构<br>
+    <span style="color:#4fc3f7;">sam3/</span> ..................... SAM3 模型代码（第三方）<br>
+    <span style="color:#4fc3f7;">1.txt</span> ..................... 系统 Prompt（给 MLLM 的指令）
+  </div>
+</section>
+
+<footer>
+  M-SAgent &mdash; MLLM + SAM3 Agentic Image Segmentation System
+</footer>
+
+<!-- =============== 交互演示 JS =============== -->
+<script>
+const steps = [
+  { cls: "log-sys",  text: "$ python main.py --image truck.jpg --text \"truck\"" },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+  { cls: "log-info", text: "[1/7] 加载图片 truck.jpg ..." },
+  { cls: "log-info", text: "      转为 RGB，缩放到 1024px，尺寸: (1024, 682)" },
+  { cls: "log-info", text: "      绘制 5x5 网格（带坐标标注）" },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-mllm", text: "[2/7] 发送给 MLLM (Qwen2.5-VL) ..." },
+  { cls: "log-mllm", text: "      输入: 原图 + 网格图 + 文字 \"truck\"" },
+  { cls: "log-mllm", text: "      MLLM 思考中..." },
+  { cls: "log-mllm", text: "      <think>" },
+  { cls: "log-mllm", text: "        1. 分析: 图中有一辆红色大卡车在路上" },
+  { cls: "log-mllm", text: "        2. 思考: 需要分割整个卡车区域" },
+  { cls: "log-mllm", text: "        3. 提醒: 目标明确且清晰，直接用概念生成即可" },
+  { cls: "log-mllm", text: "        4. 决定: 使用 concept_generator" },
+  { cls: "log-mllm", text: "      </think>" },
+  { cls: "log-mllm", text: '      <tool>{"name":"concept_generator","parameters":{"new_concepts":["truck","red truck","vehicle"],"num_concepts":3}}</tool>' },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-tool", text: "[3/7] 执行工具: concept_generator" },
+  { cls: "log-tool", text: '      概念 1: "truck" ...' },
+  { cls: "log-sam",  text: "      SAM3: CPU -> GPU, 开始文本分割" },
+  { cls: "log-sam",  text: '      SAM3: "truck" -> Mask 分数: 0.912' },
+  { cls: "log-tool", text: '      概念 2: "red truck" ...' },
+  { cls: "log-sam",  text: '      SAM3: "red truck" -> Mask 分数: 0.887' },
+  { cls: "log-tool", text: '      概念 3: "vehicle" ...' },
+  { cls: "log-sam",  text: '      SAM3: "vehicle" -> Mask 分数: 0.845' },
+  { cls: "log-sam",  text: "      SAM3: GPU -> CPU (释放显存)" },
+  { cls: "log-tool", text: '      最佳概念: "truck", 分数: 0.912' },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-info", text: "[4/7] 生成可视化检查图（Mask 叠加到原图上）" },
+  { cls: "log-info", text: "      高清放大 + 编号标注，保存 check 图片" },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-eval", text: "[5/7] MLLM 评估分割质量 ..." },
+  { cls: "log-eval", text: "      输入: 原图 + Mask 叠加图" },
+  { cls: "log-eval", text: "      MLLM: 检查 Mask 是否准确覆盖卡车 ..." },
+  { cls: "log-eval", text: "      MLLM 输出: <verdict>Accept</verdict>" },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-ok",   text: "[6/7] Accept! 分割结果被接受，无需继续迭代" },
+  { cls: "log-dim",  text: "─────────────────────────────────────" },
+
+  { cls: "log-ok",   text: "[7/7] 保存最终结果:" },
+  { cls: "log-ok",   text: "      final_result_20260406_143022.jpg" },
+  { cls: "log-ok",   text: "      final_mask_20260406_143022.npy" },
+  { cls: "log-dim",  text: "═════════════════════════════════════" },
+  { cls: "log-ok",   text: "  分割成功!  最佳分数: 0.912  迭代次数: 1" },
+  { cls: "log-dim",  text: "═════════════════════════════════════" },
+];
+
+let currentStep = 0;
+let autoMode = false;
+let autoTimer = null;
+
+function addLine(cls, text) {
+  const log = document.getElementById("demoLog");
+  const div = document.createElement("div");
+  div.className = "log-line " + cls;
+  div.textContent = text;
+  div.style.animationDelay = "0s";
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function nextStep() {
+  if (currentStep >= steps.length) {
+    document.getElementById("btnNext").disabled = true;
+    return;
+  }
+  const s = steps[currentStep];
+  addLine(s.cls, s.text);
+  currentStep++;
+  if (currentStep >= steps.length) {
+    document.getElementById("btnNext").disabled = true;
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  }
+}
+
+function startDemo() {
+  if (currentStep > 0) resetDemo();
+  document.getElementById("btnNext").disabled = false;
+  autoMode = true;
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = setInterval(() => {
+    if (currentStep >= steps.length) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+      return;
+    }
+    nextStep();
+  }, 320);
+}
+
+function resetDemo() {
+  currentStep = 0;
+  autoMode = false;
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  document.getElementById("demoLog").innerHTML = "";
+  document.getElementById("btnNext").disabled = false;
+}
+</script>
+
+</body>
+</html>

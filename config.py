@@ -105,6 +105,7 @@ class Config:
 
     # 设备配置
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    DEPLOYMENT_PROFILE = os.environ.get("M_SAGENT_DEPLOYMENT_PROFILE", "single_gpu_stable").strip() or "single_gpu_stable"
 
     # 工具配置
     MAX_TOOL_CALLS = 5
@@ -116,8 +117,8 @@ class Config:
     MIN_CELL_SIZE = 50
 
     # 图像分辨率配置
-    MLLM_MIN_PIXELS = _env_int("M_SAGENT_MLLM_MIN_PIXELS", 3000000)
-    MLLM_MAX_PIXELS = _env_int("M_SAGENT_MLLM_MAX_PIXELS", 12845056)
+    MLLM_MIN_PIXELS = _env_int("M_SAGENT_MLLM_MIN_PIXELS", 262144)
+    MLLM_MAX_PIXELS = _env_int("M_SAGENT_MLLM_MAX_PIXELS", 262144)
 
     # 定位配置
     MAX_POINTS = 5
@@ -126,13 +127,21 @@ class Config:
     # TrainAdapter 服务配置
     TRAIN_ADAPTER_ENABLED = _env_bool("TRAIN_ADAPTER_ENABLED", True)
     TRAIN_ADAPTER_URL = os.environ.get("TRAIN_ADAPTER_URL", "http://127.0.0.1:8765").rstrip("/")
-    TRAIN_ADAPTER_TIMEOUT = _env_float("TRAIN_ADAPTER_TIMEOUT", 10.0)
+    TRAIN_ADAPTER_TIMEOUT = _env_float("TRAIN_ADAPTER_TIMEOUT", 120.0)
+    TRAIN_ADAPTER_TIMEOUT_RETRY = _env_float("TRAIN_ADAPTER_TIMEOUT_RETRY", 180.0)
+    TRAIN_ADAPTER_RETRY_ON_TIMEOUT = _env_bool("TRAIN_ADAPTER_RETRY_ON_TIMEOUT", True)
+    TRAIN_ADAPTER_EXPECTED_DEVICE = os.environ.get(
+        "TRAIN_ADAPTER_EXPECTED_DEVICE",
+        "cpu" if DEPLOYMENT_PROFILE == "single_gpu_stable" else "",
+    ).strip().lower()
+    TRAIN_ADAPTER_STARTUP_HEALTHCHECK = _env_bool("TRAIN_ADAPTER_STARTUP_HEALTHCHECK", True)
     TRAIN_ADAPTER_DYNAMIC_TOPK = _env_bool("TRAIN_ADAPTER_DYNAMIC_TOPK", True)
     TRAIN_ADAPTER_ABS_THRESHOLD = _env_float("TRAIN_ADAPTER_ABS_THRESHOLD", 0.35)
     TRAIN_ADAPTER_REL_RATIO = _env_float("TRAIN_ADAPTER_REL_RATIO", 0.75)
     TRAIN_ADAPTER_MIN_K = _env_int("TRAIN_ADAPTER_MIN_K", 1)
     TRAIN_ADAPTER_MAX_K = _env_int("TRAIN_ADAPTER_MAX_K", 6)
     TRAIN_ADAPTER_MIN_SCORE_FOR_USE = _env_float("TRAIN_ADAPTER_MIN_SCORE_FOR_USE", 0.35)
+    MIN_FREE_GPU_MB = _env_int("M_SAGENT_MIN_FREE_GPU_MB", 20000)
 
     # 概念生成配置
     MIN_CONCEPTS = 3
@@ -147,4 +156,20 @@ class Config:
 
         sam_results = Path(cls.SAM3_MODEL_PATH).expanduser() / "results"
         sam_results.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def runtime_profile_summary(cls):
+        return {
+            "deployment_profile": cls.DEPLOYMENT_PROFILE,
+            "device": cls.DEVICE,
+            "train_adapter_enabled": cls.TRAIN_ADAPTER_ENABLED,
+            "train_adapter_url": cls.TRAIN_ADAPTER_URL,
+            "train_adapter_timeout": cls.TRAIN_ADAPTER_TIMEOUT,
+            "train_adapter_timeout_retry": cls.TRAIN_ADAPTER_TIMEOUT_RETRY,
+            "train_adapter_expected_device": cls.TRAIN_ADAPTER_EXPECTED_DEVICE or "any",
+            "sam3_checkpoint_path": cls.SAM3_CHECKPOINT_PATH,
+            "mllm_min_pixels": cls.MLLM_MIN_PIXELS,
+            "mllm_max_pixels": cls.MLLM_MAX_PIXELS,
+            "min_free_gpu_mb": cls.MIN_FREE_GPU_MB,
+        }
         

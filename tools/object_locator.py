@@ -16,11 +16,27 @@ class ObjectLocator:
         self.grid_rows = config.GRID_ROWS
         self.grid_cols = config.GRID_COLS
         self.train_adapter_client = train_adapter_client or TrainAdapterClient(config=config)
+
+    def check_service_health(self):
+        if not self.config.TRAIN_ADAPTER_ENABLED:
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "TRAIN_ADAPTER_ENABLED is false",
+            }
+
+        status = self.train_adapter_client.describe_service()
+        expected_device = (self.config.TRAIN_ADAPTER_EXPECTED_DEVICE or "").lower()
+        if status.get("ok") and expected_device:
+            actual_device = str(status.get("device", "")).lower()
+            status["expected_device"] = expected_device
+            status["device_matches_expected"] = actual_device == expected_device
+        return status
         
     def locate_referent(self, tool_params, image, sam_processor, query=None):
         """优先通过 TrainAdapter 服务定位，再回退到 MLLM 生成的网格点。"""
         print("定位目标...")
-        localization, labels, fallback_reason = self._resolve_point_prompts(
+        localization, labels, fallback_reason, service_meta = self._resolve_point_prompts(
             tool_params=tool_params,
             image=image,
             query=query,
@@ -31,6 +47,14 @@ class ObjectLocator:
             return {"success": False, "message": fallback_reason or "No valid localization points"}
 
         points = localization.absolute_points
+        if service_meta:
+            service_device = service_meta.get("service_device", "unknown")
+            slow_path = " (slow path)" if service_meta.get("slow_path") else ""
+            latest_attempt = (service_meta.get("attempts") or [{}])[-1]
+            elapsed_ms = latest_attempt.get("elapsed_ms")
+            elapsed_suffix = f", latency: {elapsed_ms:.2f} ms" if isinstance(elapsed_ms, (float, int)) else ""
+            print(f"TrainAdapter service device: {service_device}{slow_path}{elapsed_suffix}")
+
         print(f"使用定位来源: {localization.source}, 点数: {len(points)}, top score: {localization.top_score():.3f}")
 
         try:
@@ -51,7 +75,17 @@ class ObjectLocator:
 
             meta_path = self.config.TOOL_CALLS_LOG / f"object_locator_meta_{timestamp}.json"
             with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(localization.as_dict(), f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {
+                        "localization": localization.as_dict(),
+                        "train_adapter_service": service_meta,
+                        "fallback_reason": fallback_reason,
+                        "runtime_profile": self.config.runtime_profile_summary(),
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
         except Exception as e:
             print(f"点可视化失败: {e}")
             
@@ -81,6 +115,7 @@ class ObjectLocator:
                     print(f"保存分割结果可视化失败: {e}")
 
             result["localization"] = localization.as_dict()
+            result["train_adapter_service"] = service_meta
             if fallback_reason:
                 result["fallback_reason"] = fallback_reason
             
@@ -92,6 +127,7 @@ class ObjectLocator:
             "points": points,
             "labels": labels,
             "localization": localization.as_dict(),
+            "train_adapter_service": service_meta,
             "fallback_reason": fallback_reason,
         }
 
@@ -103,17 +139,24 @@ class ObjectLocator:
         fallback_reason = None
         localization = None
         labels = None
+        service_meta = None
 
         if self.config.TRAIN_ADAPTER_ENABLED and query:
             try:
-                localization = self.train_adapter_client.localize(image, query)
+                if hasattr(self.train_adapter_client, "localize_with_metadata"):
+                    localization, service_meta = self.train_adapter_client.localize_with_metadata(image, query)
+                else:
+                    localization = self.train_adapter_client.localize(image, query)
+                    service_meta = {}
             except Exception as exc:
                 fallback_reason = f"TrainAdapter unavailable: {exc}"
                 print(fallback_reason)
             else:
+                if service_meta and service_meta.get("slow_path"):
+                    print("TrainAdapter is serving requests on CPU slow path")
                 if localization.has_usable_points(self.config.TRAIN_ADAPTER_MIN_SCORE_FOR_USE):
                     labels = [1] * len(localization.absolute_points)
-                    return localization, labels, None
+                    return localization, labels, None, service_meta
                 fallback_reason = (
                     "TrainAdapter returned low-confidence localization "
                     f"(top_score={localization.top_score():.3f}, selected_k={localization.selected_k})"
@@ -126,10 +169,10 @@ class ObjectLocator:
             image.size,
         )
         if not points:
-            return None, None, fallback_reason or "No valid TrainAdapter result or fallback hints"
+            return None, None, fallback_reason or "No valid TrainAdapter result or fallback hints", service_meta
 
         localization = self._build_hint_localization(points, labels, image.size)
-        return localization, labels, fallback_reason
+        return localization, labels, fallback_reason, service_meta
 
     def _build_hint_localization(self, points, labels, image_size):
         width, height = image_size
