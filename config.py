@@ -77,6 +77,15 @@ class Config:
         BASE_DIR / "sam3",
         Path("/root/autodl-tmp/sam3"),
     ))
+    SAM3_CHECKPOINT_PATH = str(_resolve_existing_path(
+        os.environ.get("M_SAGENT_SAM3_CHECKPOINT_PATH"),
+        Path(SAM3_MODEL_PATH) / "sam3.pt",
+        Path("/root/autodl-tmp/modelscope_cache_sam3/facebook/sam3/sam3.pt"),
+    ))
+    SAM3_BPE_PATH = str(_resolve_existing_path(
+        os.environ.get("M_SAGENT_SAM3_BPE_PATH"),
+        Path(SAM3_MODEL_PATH) / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz",
+    ))
 
     # 文本提示词路径
     SYSTEM_PROMPT = _resolve_existing_path(
@@ -107,8 +116,8 @@ class Config:
     MIN_CELL_SIZE = 50
 
     # 图像分辨率配置
-    MLLM_MIN_PIXELS = 3000000
-    MLLM_MAX_PIXELS = 12845056
+    MLLM_MIN_PIXELS = _env_int("M_SAGENT_MLLM_MIN_PIXELS", 3000000)
+    MLLM_MAX_PIXELS = _env_int("M_SAGENT_MLLM_MAX_PIXELS", 12845056)
 
     # 定位配置
     MAX_POINTS = 5

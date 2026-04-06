@@ -42,7 +42,11 @@ class SAMProcessor:
         print("加载SAM3模型...")
         try:
             # 尝试加载模型
-            self.model = build_sam3_image_model(enable_inst_interactivity=True)
+            self.model = build_sam3_image_model(
+                bpe_path=Config.SAM3_BPE_PATH,
+                checkpoint_path=Config.SAM3_CHECKPOINT_PATH,
+                enable_inst_interactivity=True,
+            )
             print("✓ 模型构建成功")
             
             # 创建处理器
@@ -93,8 +97,12 @@ class SAMProcessor:
         """使用文本提示分割图像"""
         # 检查模型是否可用
         if not self.is_available():
-            print("SAM3不可用，返回模拟结果")
-            return 
+            print("SAM3不可用，无法执行文本提示分割")
+            return {
+                "success": False,
+                "message": "SAM3 unavailable",
+                "results": []
+            }
 
         try:
             # 移至GPU
@@ -172,13 +180,22 @@ class SAMProcessor:
     
     def segment_with_points(self, image, points, labels, multimask_output=True):
         """使用点提示分割图像"""
+        if not self.is_available():
+            print("SAM3不可用，无法执行点提示分割")
+            return {
+                "success": False,
+                "message": "SAM3 unavailable",
+                "results": [],
+                "best_result": None,
+            }
+
+        results = []
         try:
             self.to_gpu() # 移至GPU
             
             # 设置图像
             print("设置图像...")
             inference_state = self.processor.set_image(image)
-            results = []
             
             # 转换为numpy数组
             points_np = np.array(points, dtype=np.float32)
@@ -242,6 +259,12 @@ class SAMProcessor:
 
         except Exception as e:
             print(f"点提示分割失败: {e}")
+            return {
+                "success": False,
+                "message": f"分割失败: {str(e)}",
+                "results": [],
+                "best_result": None,
+            }
         finally:
             self.to_cpu() # 移至CPU
 
