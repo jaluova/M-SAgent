@@ -175,8 +175,9 @@ class Config:
     MIN_CELL_SIZE = 50
 
     # 图像分辨率配置
-    MLLM_MIN_PIXELS = _env_int("M_SAGENT_MLLM_MIN_PIXELS", 262144)
-    MLLM_MAX_PIXELS = _env_int("M_SAGENT_MLLM_MAX_PIXELS", 262144)
+    # 默认允许 Qwen2.5-VL 保留接近原图的细节，而不是强制压到约 512x512。
+    MLLM_MIN_PIXELS = _env_int("M_SAGENT_MLLM_MIN_PIXELS", 786432)
+    MLLM_MAX_PIXELS = _env_int("M_SAGENT_MLLM_MAX_PIXELS", 1048576)
 
     # 定位配置
     MAX_POINTS = 5
