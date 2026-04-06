@@ -56,6 +56,7 @@ class EmbeddedGridGroundPredictor:
         self.config_path = Path(config.GRIDGROUND_CONFIG_PATH).expanduser()
         self.adapter_path = Path(config.GRIDGROUND_ADAPTER_PATH).expanduser()
         self.runtime_config = EmbeddedGridGroundConfig.from_json_file(self.config_path)
+        self._align_runtime_config_with_shared_backbone()
         self.device = shared_backbone.visual_device()
         self.tokenizer = shared_backbone.tokenizer
         if self.tokenizer is None:
@@ -88,14 +89,84 @@ class EmbeddedGridGroundPredictor:
             return LightweightCoordinateAdapter(**kwargs)
         return CoordinateAdapter(**kwargs)
 
-    def _load_adapter_weights(self):
-        checkpoint = torch.load(self.adapter_path, map_location=self.device)
+    def _align_runtime_config_with_shared_backbone(self):
+        backbone_dim = (
+            getattr(self.shared_backbone, "text_dim", None)
+            or getattr(self.shared_backbone, "visual_dim", None)
+        )
+        if backbone_dim and int(backbone_dim) != int(self.runtime_config.visual_dim):
+            print(
+                "Overriding GridGround visual_dim from "
+                f"{self.runtime_config.visual_dim} to shared Qwen dim {int(backbone_dim)}"
+            )
+            self.runtime_config.visual_dim = int(backbone_dim)
+
+    @staticmethod
+    def _normalize_state_key(key):
+        prefixes = (
+            "module.adapter.",
+            "adapter.",
+            "module.",
+            "model.adapter.",
+            "model.",
+        )
+        normalized = key
+        changed = True
+        while changed:
+            changed = False
+            for prefix in prefixes:
+                if normalized.startswith(prefix):
+                    normalized = normalized[len(prefix):]
+                    changed = True
+        return normalized
+
+    @classmethod
+    def _extract_adapter_state_dict(cls, checkpoint, target_keys):
         state_dict = checkpoint.get("model_state_dict", checkpoint)
+        if not isinstance(state_dict, dict):
+            raise RuntimeError("GridGround checkpoint does not contain a loadable state_dict")
+
+        filtered = {}
+        for key, value in state_dict.items():
+            normalized_key = cls._normalize_state_key(key)
+            if normalized_key in target_keys:
+                filtered[normalized_key] = value
+        return filtered
+
+    def _compact_checkpoint_path(self):
+        suffix = "".join(self.adapter_path.suffixes) or ".pth"
+        if suffix == ".adapter_only.pth":
+            return self.adapter_path
+        stem = self.adapter_path.name
+        if suffix:
+            stem = stem[: -len(suffix)]
+        return self.adapter_path.with_name(f"{stem}.adapter_only.pth")
+
+    def _load_adapter_weights(self):
+        target_keys = set(self.adapter.state_dict().keys())
+        compact_checkpoint_path = self._compact_checkpoint_path()
+        checkpoint_path = compact_checkpoint_path if compact_checkpoint_path.is_file() else self.adapter_path
+
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = self._extract_adapter_state_dict(checkpoint, target_keys)
+        if not state_dict:
+            raise RuntimeError(
+                f"No adapter weights matched the embedded GridGround runtime in checkpoint: {checkpoint_path}"
+            )
+
+        if checkpoint_path != compact_checkpoint_path:
+            try:
+                torch.save(state_dict, compact_checkpoint_path)
+                print(f"Cached adapter-only checkpoint at {compact_checkpoint_path}")
+            except Exception as exc:
+                print(f"Failed to cache adapter-only checkpoint: {exc}")
+
         missing_keys, unexpected_keys = self.adapter.load_state_dict(state_dict, strict=False)
         if missing_keys:
             print(f"Embedded GridGround missing keys: {missing_keys}")
         if unexpected_keys:
             print(f"Embedded GridGround unexpected keys: {unexpected_keys}")
+        self.adapter.to(self.device)
         self.adapter.eval()
 
     def describe_runtime(self):

@@ -12,9 +12,27 @@ class SharedQwenBackbone:
         self.qwen_model = qwen_model
         self.qwen_processor = qwen_processor
         self.tokenizer = getattr(qwen_processor, "tokenizer", None)
-        self.visual_dim = qwen_model.config.hidden_size
-        self.text_dim = qwen_model.config.hidden_size
+        self.visual_dim = self._resolve_hidden_size(
+            qwen_model.config,
+            getattr(getattr(qwen_model, "visual", None), "config", None),
+            getattr(qwen_model.config, "vision_config", None),
+        )
+        self.text_dim = self._resolve_hidden_size(
+            qwen_model.config,
+            getattr(qwen_model.config, "text_config", None),
+        )
         self.merge_size = getattr(qwen_processor.image_processor, "merge_size", 1)
+
+    @staticmethod
+    def _resolve_hidden_size(*configs):
+        for config in configs:
+            if config is None:
+                continue
+            for attr in ("hidden_size", "embed_dim", "out_hidden_size", "d_model"):
+                value = getattr(config, attr, None)
+                if value is not None:
+                    return value
+        return None
 
     def _module_device(self, module):
         try:

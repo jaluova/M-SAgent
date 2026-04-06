@@ -6,6 +6,7 @@ from PIL import Image
 from config import Config
 from tools.object_locator import ObjectLocator
 from utils.localization import LocalizationResult
+from gridground_runtime.embedded_predictor import EmbeddedGridGroundPredictor
 
 
 class FakeTrainAdapterClient:
@@ -227,6 +228,26 @@ class ObjectLocatorTests(unittest.TestCase):
         self.assertEqual(result["localization"]["source"], "gridground_embedded")
         self.assertEqual(result["train_adapter_service"]["backend"], "embedded")
         self.assertEqual(result["train_adapter_service"]["service_device"], "cuda")
+
+    def test_embedded_checkpoint_filters_prefixed_adapter_weights(self):
+        target_keys = {"grid_classifier.weight", "grid_classifier.bias"}
+        checkpoint = {
+            "model_state_dict": {
+                "adapter.grid_classifier.weight": "weight_tensor",
+                "module.adapter.grid_classifier.bias": "bias_tensor",
+                "qwen_model.visual.blocks.0.attn.q_proj.weight": "ignored",
+            }
+        }
+
+        filtered = EmbeddedGridGroundPredictor._extract_adapter_state_dict(checkpoint, target_keys)
+
+        self.assertEqual(
+            filtered,
+            {
+                "grid_classifier.weight": "weight_tensor",
+                "grid_classifier.bias": "bias_tensor",
+            },
+        )
 
 
 if __name__ == "__main__":
