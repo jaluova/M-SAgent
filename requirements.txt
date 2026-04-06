@@ -1,0 +1,16 @@
+# Install a CUDA-matched torch/torchvision build first when using GPU.
+# Example (CUDA 12.4):
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
+
+torch==2.5.1
+torchvision==0.20.1
+transformers==5.5.0
+accelerate==1.13.0
+qwen-vl-utils==0.0.14
+Pillow==12.1.1
+numpy==1.26.4
+opencv-python==4.11.0.86
+matplotlib==3.10.8
+modelscope==1.35.3
+
+-e ./sam3

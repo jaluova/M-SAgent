@@ -91,6 +91,25 @@ class MLLMSAMPipeline:
 
     def get_color(self, index):
         return self.COLORS[index % len(self.COLORS)]
+
+    def _normalize_segmentation_evaluation_result(self, evaluation_result):
+        if isinstance(evaluation_result, (tuple, list)) and len(evaluation_result) >= 2:
+            verdict, rejected_indices = evaluation_result[0], evaluation_result[1]
+        elif isinstance(evaluation_result, str):
+            verdict, rejected_indices = evaluation_result, []
+        else:
+            verdict, rejected_indices = "Reject", []
+
+        verdict = str(verdict).capitalize()
+        if verdict not in {"Accept", "Reject"}:
+            verdict = "Reject"
+
+        if isinstance(rejected_indices, (list, tuple, set)):
+            rejected_indices = list(rejected_indices)
+        else:
+            rejected_indices = []
+
+        return verdict, rejected_indices
     
     def run(self, image_path, text_prompt, max_iterations=None):
         """
@@ -268,10 +287,13 @@ class MLLMSAMPipeline:
             # 但 mllm_processor.segmentation_evaluation 内部有 image_resolution_params，会强制 MLLM把它们都看作大图。
             # 所以这里可以直接传原图和高清check图。Qwen 会把原图放大匹配。
             
-            verdict, rejected_indices = self.mllm.segmentation_evaluation(
+            evaluation_result = self.mllm.segmentation_evaluation(
                 self.state["original_image"],
                 check_image,
                 self.state["original_text"]
+            )
+            verdict, rejected_indices = self._normalize_segmentation_evaluation_result(
+                evaluation_result
             )
             
             print(f"评估结论: {verdict}")

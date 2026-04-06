@@ -219,11 +219,10 @@ Below are the original image and the image  with grid respectively"""
         
     def segmentation_evaluation(self, original_image, masked_image, text_prompt):
         """评估分割结果，返回Accept或Reject"""
+        eval_orig_path = Config.BASE_DIR / "temp_eval_orig.jpg"
+        eval_mask_path = Config.BASE_DIR / "temp_eval_mask.jpg"
         try:
             # 保存临时图像
-            eval_orig_path = Config.BASE_DIR / "temp_eval_orig.jpg"
-            eval_mask_path = Config.BASE_DIR / "temp_eval_mask.jpg"
-            
             original_image.save(eval_orig_path)
             masked_image.save(eval_mask_path)
             
@@ -278,13 +277,7 @@ Below are the original image and the image  with grid respectively"""
                 output_text = output_text[0]
 
             print(f"MLLM评估输出: {output_text}")
-            
-            # 清理临时文件
-            if eval_orig_path.exists():
-                eval_orig_path.unlink()
-            if eval_mask_path.exists():
-                eval_mask_path.unlink()
-            
+
             # 解析 Verdict
             verdict_match = re.search(r"<verdict>\s*(Accept|Reject)\s*</verdict>", output_text, re.IGNORECASE)
             rejected_indices = []
@@ -317,7 +310,14 @@ Below are the original image and the image  with grid respectively"""
             print(f"MLLM评估出错: {e}")
             import traceback
             traceback.print_exc()
-            return ""
+            return "Reject", []
+        finally:
+            for temp_path in (eval_orig_path, eval_mask_path):
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError as cleanup_error:
+                    print(f"清理临时文件失败: {temp_path} -> {cleanup_error}")
         
     
     
