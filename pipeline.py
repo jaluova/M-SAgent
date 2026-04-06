@@ -116,7 +116,12 @@ class MLLMSAMPipeline:
                 
             elif action == "object_locator":
                 # 定位目标，得到使用点提示的带有mask的分割结果图片
-                result = self.locator.locate_object_with_points(tool_params, self.state["original_image"], self.sam)
+                result = self.locator.locate_referent(
+                    tool_params,
+                    self.state["original_image"],
+                    self.sam,
+                    query=self.state["original_text"],
+                )
                 verdict = self._process_segmentation_result(result, "object_locator")
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")

@@ -8,8 +8,10 @@ warnings.filterwarnings("ignore")
 import sys
 import os
 
+from config import Config
+
 # 添加SAM3目录到Python路径
-sam3_root = "/root/autodl-tmp/sam3/sam3"
+sam3_root = os.path.join(Config.SAM3_MODEL_PATH, "sam3")
 if sam3_root not in sys.path:
     sys.path.insert(0, sam3_root)
 
@@ -23,8 +25,6 @@ try:
 except ImportError as e:
     print(f"导入失败: {e}")
     SAM3_AVAILABLE = False
-
-from config import Config
 
 class SAMProcessor:
     def __init__(self):
