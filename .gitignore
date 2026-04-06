@@ -1,0 +1,33 @@
+.DS_Store
+
+# Local tooling
+.claude/
+.idea/
+.vscode/
+
+# Python cache / test cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local runtime outputs
+tool_calls_log/
+outputs/
+outputs_*/
+remote_artifacts/
+run_logs/
+temp_*.jpg
+temp_*.jpeg
+temp_*.png
+temp_*.npy
+
+# Local SAM3 runtime artifacts
+sam3/results/
