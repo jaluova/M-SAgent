@@ -43,6 +43,8 @@ class SharedQwenBackbone:
     def visual_device(self):
         if hasattr(self.qwen_model, "visual"):
             return self._module_device(self.qwen_model.visual)
+        if hasattr(self.qwen_model, "model") and hasattr(self.qwen_model.model, "visual"):
+            return self._module_device(self.qwen_model.model.visual)
         return self._module_device(self.qwen_model)
 
     def text_device(self):
@@ -80,10 +82,38 @@ class SharedQwenBackbone:
             padded[idx, :chunk.shape[0]] = chunk
         return padded
 
-    def encode_image(self, images):
-        if not hasattr(self.qwen_model, "visual"):
-            raise AttributeError("Qwen model does not expose a supported visual encoder")
+    @staticmethod
+    def _pad_feature_chunks(chunks):
+        if not chunks:
+            raise ValueError("No visual feature chunks were returned by Qwen")
+        max_tokens = max(chunk.shape[0] for chunk in chunks)
+        hidden_dim = chunks[0].shape[-1]
+        padded = chunks[0].new_zeros((len(chunks), max_tokens, hidden_dim))
+        for idx, chunk in enumerate(chunks):
+            padded[idx, :chunk.shape[0]] = chunk
+        return padded
 
+    def _coerce_visual_features(self, outputs):
+        if isinstance(outputs, torch.Tensor):
+            if outputs.ndim == 3:
+                return outputs
+            if outputs.ndim == 2:
+                return outputs.unsqueeze(0)
+            raise ValueError(f"Unsupported visual tensor shape: {tuple(outputs.shape)}")
+
+        if isinstance(outputs, (list, tuple)):
+            chunks = []
+            for chunk in outputs:
+                if not isinstance(chunk, torch.Tensor):
+                    raise TypeError(f"Unsupported visual feature chunk type: {type(chunk)!r}")
+                if chunk.ndim == 1:
+                    chunk = chunk.unsqueeze(0)
+                chunks.append(chunk)
+            return self._pad_feature_chunks(chunks)
+
+        raise TypeError(f"Unsupported visual feature container: {type(outputs)!r}")
+
+    def encode_image(self, images):
         pil_images = [self._tensor_to_pil(image) for image in images]
         image_inputs = self.qwen_processor.image_processor(
             pil_images,
@@ -94,8 +124,25 @@ class SharedQwenBackbone:
         image_grid_thw = image_inputs["image_grid_thw"].to(device)
 
         with torch.no_grad():
-            outputs = self.qwen_model.visual(pixel_values, image_grid_thw)
-        return self._pack_visual_outputs(outputs, image_grid_thw)
+            if hasattr(self.qwen_model, "get_image_features"):
+                outputs = self.qwen_model.get_image_features(
+                    pixel_values=pixel_values,
+                    image_grid_thw=image_grid_thw,
+                )
+                return self._coerce_visual_features(getattr(outputs, "pooler_output", outputs))
+
+            if hasattr(self.qwen_model, "model") and hasattr(self.qwen_model.model, "get_image_features"):
+                outputs = self.qwen_model.model.get_image_features(
+                    pixel_values=pixel_values,
+                    image_grid_thw=image_grid_thw,
+                )
+                return self._coerce_visual_features(getattr(outputs, "pooler_output", outputs))
+
+            if hasattr(self.qwen_model, "visual"):
+                outputs = self.qwen_model.visual(pixel_values, image_grid_thw)
+                return self._pack_visual_outputs(outputs, image_grid_thw)
+
+        raise AttributeError("Qwen model does not expose a supported visual encoder")
 
     def encode_text(self, input_ids, attention_mask=None):
         device = self.text_device()
