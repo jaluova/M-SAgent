@@ -45,6 +45,31 @@ class FakeSAMProcessor:
         return image.copy()
 
 
+class FakeEmbeddedLocalizer:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+
+    def describe_runtime(self):
+        return {
+            "ok": True,
+            "backend": "embedded",
+            "device": "cuda",
+            "shared_qwen": True,
+        }
+
+    def localize_with_metadata(self, image, query):
+        if self.error:
+            raise self.error
+        return self.result, {
+            "backend": "embedded",
+            "service_device": "cuda",
+            "slow_path": False,
+            "attempts": [{"attempt": 1, "ok": True, "elapsed_ms": 12.3}],
+            "retry_used": False,
+        }
+
+
 class ObjectLocatorTests(unittest.TestCase):
     def setUp(self):
         self.image = Image.new("RGB", (500, 300), color="white")
@@ -180,6 +205,28 @@ class ObjectLocatorTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["localization"]["source"], "mllm_hints")
         self.assertEqual(self.sam.calls[0]["labels"], [1])
+
+    def test_embedded_backend_uses_shared_qwen_localizer(self):
+        localization = LocalizationResult(
+            absolute_points=[[20.0, 30.0], [40.0, 60.0]],
+            normalized_points=[[0.04, 0.1], [0.08, 0.2]],
+            scores=[0.91, 0.77],
+            selection_mode="dynamic_topk",
+            selected_k=2,
+            source="gridground_embedded",
+        )
+        locator = ObjectLocator(
+            None,
+            embedded_localizer=FakeEmbeddedLocalizer(result=localization),
+        )
+        locator.localization_backend = "embedded"
+
+        result = locator.locate_referent({}, self.image, self.sam, query="target object")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["localization"]["source"], "gridground_embedded")
+        self.assertEqual(result["train_adapter_service"]["backend"], "embedded")
+        self.assertEqual(result["train_adapter_service"]["service_device"], "cuda")
 
 
 if __name__ == "__main__":

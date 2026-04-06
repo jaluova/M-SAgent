@@ -10,11 +10,13 @@ from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 from config import Config
 from utils.image_utils import add_grid_to_image, resize_image, ensure_rgb, smart_resize_for_mllm
+from utils.shared_qwen_backbone import SharedQwenBackbone
 
 class MLLMProcessor:
     def __init__(self):
         self.device = Config.DEVICE
         self.model, self.processor = self._load_model()
+        self.shared_backbone = SharedQwenBackbone(self.model, self.processor)
         print("MLLM处理器初始化完成")
         
     def _load_model(self):

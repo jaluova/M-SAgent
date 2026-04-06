@@ -52,6 +52,39 @@ def _resolve_existing_path(*candidates):
     return resolved[0]
 
 
+def _resolve_existing_file(*candidates):
+    resolved = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        resolved.append(Path(candidate).expanduser())
+
+    if not resolved:
+        return None
+
+    for candidate in resolved:
+        if candidate.is_file():
+            return candidate
+
+    return resolved[0]
+
+
+def _discover_first_file(directory, patterns):
+    if directory is None:
+        return None
+
+    directory = Path(directory).expanduser()
+    if not directory.exists():
+        return None
+
+    for pattern in patterns:
+        matches = sorted(directory.glob(pattern))
+        for match in matches:
+            if match.is_file():
+                return match
+    return None
+
+
 class Config:
     REPO_ROOT = _repo_root()
     LEGACY_BASE_DIR = Path("/root/autodl-tmp/mllm_sam_project")
@@ -86,6 +119,31 @@ class Config:
         os.environ.get("M_SAGENT_SAM3_BPE_PATH"),
         Path(SAM3_MODEL_PATH) / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz",
     ))
+    GRIDGROUND_BACKEND = os.environ.get("GRIDGROUND_BACKEND", "embedded").strip().lower() or "embedded"
+    GRIDGROUND_MODEL_ID = os.environ.get("GRIDGROUND_MODEL_ID", "alpharho/GridGround-TextGuided").strip()
+    GRIDGROUND_MODEL_DIR = _resolve_existing_path(
+        os.environ.get("GRIDGROUND_MODEL_DIR"),
+        Path("/root/autodl-tmp/modelscope_cache_gridground") / GRIDGROUND_MODEL_ID,
+        Path("/root/autodl-tmp/modelscope") / GRIDGROUND_MODEL_ID,
+        BASE_DIR / "gridground_model",
+        Path("/root/autodl-tmp/Data/train_outputs/textguided_recover_20260405_shortval"),
+    )
+    GRIDGROUND_CONFIG_PATH = _resolve_existing_file(
+        os.environ.get("GRIDGROUND_CONFIG_PATH"),
+        _discover_first_file(
+            GRIDGROUND_MODEL_DIR,
+            ["config.json", "*config*.json"],
+        ),
+        Path("/root/autodl-tmp/Data/train_outputs/textguided_recover_20260405_shortval/config.json"),
+    )
+    GRIDGROUND_ADAPTER_PATH = _resolve_existing_file(
+        os.environ.get("GRIDGROUND_ADAPTER_PATH"),
+        _discover_first_file(
+            GRIDGROUND_MODEL_DIR,
+            ["best_model.pth", "*.pth", "*.pt", "adapter*.bin"],
+        ),
+        Path("/root/autodl-tmp/Data/train_outputs/textguided_recover_20260405_shortval/checkpoints/best_model.pth"),
+    )
 
     # 文本提示词路径
     SYSTEM_PROMPT = _resolve_existing_path(
@@ -168,6 +226,10 @@ class Config:
             "train_adapter_timeout_retry": cls.TRAIN_ADAPTER_TIMEOUT_RETRY,
             "train_adapter_expected_device": cls.TRAIN_ADAPTER_EXPECTED_DEVICE or "any",
             "sam3_checkpoint_path": cls.SAM3_CHECKPOINT_PATH,
+            "gridground_backend": cls.GRIDGROUND_BACKEND,
+            "gridground_model_dir": str(cls.GRIDGROUND_MODEL_DIR),
+            "gridground_config_path": str(cls.GRIDGROUND_CONFIG_PATH),
+            "gridground_adapter_path": str(cls.GRIDGROUND_ADAPTER_PATH),
             "mllm_min_pixels": cls.MLLM_MIN_PIXELS,
             "mllm_max_pixels": cls.MLLM_MAX_PIXELS,
             "min_free_gpu_mb": cls.MIN_FREE_GPU_MB,

@@ -62,25 +62,26 @@ class MLLMSAMPipeline:
 
     def _run_startup_healthchecks(self):
         if not Config.TRAIN_ADAPTER_STARTUP_HEALTHCHECK:
-            print("TrainAdapter startup health check disabled")
+            print("Localization backend startup health check disabled")
             return
 
         status = self.locator.check_service_health()
         if status.get("skipped"):
-            print(f"TrainAdapter startup check skipped: {status.get('reason')}")
+            print(f"Localization backend startup check skipped: {status.get('reason')}")
             return
 
         if not status.get("ok"):
             print(
-                "TrainAdapter startup check failed: "
+                "Localization backend startup check failed: "
                 f"{status.get('error')} (kind={status.get('error_kind', 'unknown')})"
             )
             return
 
+        backend = status.get("backend", Config.GRIDGROUND_BACKEND)
         device = status.get("device", "unknown")
         elapsed_ms = status.get("elapsed_ms")
         device_suffix = f", latency={elapsed_ms:.2f} ms" if isinstance(elapsed_ms, (float, int)) else ""
-        print(f"TrainAdapter startup check passed: device={device}{device_suffix}")
+        print(f"Localization backend startup check passed: backend={backend}, device={device}{device_suffix}")
 
         if "device_matches_expected" in status and not status["device_matches_expected"]:
             print(

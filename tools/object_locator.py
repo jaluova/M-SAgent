@@ -1,23 +1,51 @@
 import numpy as np
 import json
+import time
 from PIL import ImageDraw
 from config import Config
 from datetime import datetime
 
+from gridground_runtime.embedded_predictor import EmbeddedGridGroundPredictor
 from tools.train_adapter_client import TrainAdapterClient
 from utils.localization import LocalizationResult
 
 class ObjectLocator:
     """目标定位工具"""
     
-    def __init__(self, mllm_processor, train_adapter_client=None, config=Config):
+    def __init__(self, mllm_processor, train_adapter_client=None, embedded_localizer=None, config=Config):
         self.mllm = mllm_processor
         self.config = config
         self.grid_rows = config.GRID_ROWS
         self.grid_cols = config.GRID_COLS
+        self.localization_backend = (config.GRIDGROUND_BACKEND or "embedded").lower()
+        self.embedded_localizer_init_error = None
+        self.embedded_localizer = embedded_localizer
+        if self.localization_backend == "embedded" and self.embedded_localizer is None and mllm_processor is not None:
+            try:
+                self.embedded_localizer = EmbeddedGridGroundPredictor(
+                    mllm_processor.shared_backbone,
+                    config=config,
+                )
+            except Exception as exc:
+                self.embedded_localizer_init_error = str(exc)
+                print(f"Embedded GridGround init failed: {exc}")
+
+        if self.localization_backend == "embedded" and self.embedded_localizer is None and train_adapter_client is not None:
+            self.localization_backend = "http"
+
         self.train_adapter_client = train_adapter_client or TrainAdapterClient(config=config)
 
     def check_service_health(self):
+        if self.localization_backend == "embedded":
+            if self.embedded_localizer is None:
+                return {
+                    "ok": False,
+                    "backend": "embedded",
+                    "error": self.embedded_localizer_init_error or "embedded runtime unavailable",
+                    "error_kind": "init",
+                }
+            return self.embedded_localizer.describe_runtime()
+
         if not self.config.TRAIN_ADAPTER_ENABLED:
             return {
                 "ok": False,
@@ -141,7 +169,36 @@ class ObjectLocator:
         labels = None
         service_meta = None
 
-        if self.config.TRAIN_ADAPTER_ENABLED and query:
+        if self.localization_backend == "embedded" and query:
+            if self.embedded_localizer is None:
+                fallback_reason = (
+                    "Embedded GridGround unavailable: "
+                    f"{self.embedded_localizer_init_error or 'runtime not initialized'}"
+                )
+                print(fallback_reason)
+            else:
+                started = time.perf_counter()
+                try:
+                    localization, service_meta = self.embedded_localizer.localize_with_metadata(image, query)
+                except Exception as exc:
+                    fallback_reason = f"Embedded GridGround unavailable: {exc}"
+                    print(fallback_reason)
+                else:
+                    if service_meta and service_meta.get("attempts"):
+                        service_meta["attempts"][0]["elapsed_ms"] = round(
+                            (time.perf_counter() - started) * 1000.0,
+                            2,
+                        )
+                    if localization.has_usable_points(self.config.TRAIN_ADAPTER_MIN_SCORE_FOR_USE):
+                        labels = [1] * len(localization.absolute_points)
+                        return localization, labels, None, service_meta
+                    fallback_reason = (
+                        "Embedded GridGround returned low-confidence localization "
+                        f"(top_score={localization.top_score():.3f}, selected_k={localization.selected_k})"
+                    )
+                    print(fallback_reason)
+
+        if self.config.TRAIN_ADAPTER_ENABLED and query and self.localization_backend == "http":
             try:
                 if hasattr(self.train_adapter_client, "localize_with_metadata"):
                     localization, service_meta = self.train_adapter_client.localize_with_metadata(image, query)
