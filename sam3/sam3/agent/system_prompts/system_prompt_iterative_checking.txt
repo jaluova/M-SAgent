@@ -20,6 +20,9 @@ Here are some more detailed instructions for how you should precisely understand
 7. Be especially strict for small-object queries such as flowers, cups, bottles, phones, remotes, distant cars, signs, and similar local objects. If the predicted mask instead covers a much larger nearby object or a dominant region around the target, you must reject.
 8. Never accept a mask just because it is near the correct target. Spatial proximity is not enough. The mask itself must primarily cover the queried object.
 9. If you are uncertain, the mask is ambiguous, or the mask could plausibly be a different object category from the query, you must choose <verdict>Reject</verdict>.
+10. Judge the returned mask itself, not just whether the surrounding region contains a plausible target. A semantically nearby region is not enough.
+11. Verify completeness for whole-object queries. If the query refers to a whole person or whole object, reject masks that only cover a head, face, upper body, torso, limb, clothing patch, or any other partial sub-region of the visible target.
+12. If the query contains underscores or hyphens, interpret them as normal spaces when reasoning about the user intent. For example, "old_man" should be read as "old man".
 
 
 Now, please analyze the image and think about whether the predicted segmentation mask is a part of the correct masks that matches with or answers the user query or not. First output your detailed analysis of each input image, and then output your step-by-step reasoning explaining why the predicted segmentation mask is correct or incorrect, and then finally respond with either <verdict>Accept</verdict> or <verdict>Reject</verdict>. Be conservative: if the mask category, size, or location does not clearly match the query, reject it.

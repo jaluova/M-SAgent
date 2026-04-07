@@ -103,3 +103,12 @@ class EvaluationContractTests(unittest.TestCase):
         self.assertIn("score=0.812", prompt)
         self.assertIn("note=mask rejected by evaluation", prompt)
         self.assertIn("current accepted-mask overlay image", prompt)
+
+    def test_build_check_prompt_normalizes_query_and_requires_full_person_mask(self):
+        processor = MLLMProcessor.__new__(MLLMProcessor)
+
+        prompt = processor._build_check_user_prompt("old_man")
+
+        self.assertIn("Normalized natural-language form of the query: old man", prompt)
+        self.assertIn("Judge the returned mask itself", prompt)
+        self.assertIn("whole visible person", prompt)

@@ -306,17 +306,39 @@ class MLLMProcessor:
         with open(Config.SYSTEM_PROMPT_ITERATIVE_CHECKING, "r", encoding="utf-8") as f:
             return f.read()
 
+    def _normalize_query_text(self, text_prompt):
+        """Normalize shorthand query text for evaluation prompts."""
+        text = str(text_prompt).strip()
+        normalized = re.sub(r"[_\-]+", " ", text)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized or text
+
+    def _build_check_user_prompt(self, text_prompt):
+        normalized_query = self._normalize_query_text(text_prompt)
+        parts = [f"Initial user input query: {text_prompt}"]
+        if normalized_query != str(text_prompt).strip():
+            parts.append(f"Normalized natural-language form of the query: {normalized_query}")
+        parts.extend(
+            [
+                "You will receive three images in order:",
+                "1. the original image;",
+                "2. the whole-image mask overlay;",
+                "3. the zoomed-in review image, which contains two side-by-side panels: "
+                "a tight mask-focused crop and a larger context crop around the same candidate.",
+                "Judge the returned mask itself, not just whether a plausible nearby object matches the query.",
+                "The mask must cover the full visible extent required by the query. Reject masks that only cover "
+                "a head, face, upper body, torso, limb, clothing region, or any other subpart when the query refers "
+                "to a whole object or whole person.",
+                "For person/man/woman/boy/girl/old man style queries, the correct result is the whole visible person. "
+                "If substantial visible body parts are missing from the mask, reject it.",
+            ]
+        )
+        return "\n".join(parts)
+
     def get_check_prompt(self, text_prompt):
         """获取用于迭代检查的提示词文本（保留向后兼容）"""
         system_prompt = self._read_check_system_prompt()
-        user_prompt = (
-            f"Initial user input query: {text_prompt}\n"
-            "You will receive three images in order:\n"
-            "1. the original image;\n"
-            "2. the whole-image mask overlay;\n"
-            "3. the zoomed-in review image, which contains two side-by-side panels: "
-            "a tight mask-focused crop and a larger context crop around the same candidate."
-        )
+        user_prompt = self._build_check_user_prompt(text_prompt)
         return system_prompt + "\n\n" + user_prompt
         
     def segmentation_evaluation(self, original_image, masked_image, text_prompt, zoomed_image=None):
@@ -338,14 +360,7 @@ class MLLMProcessor:
 
             # 构建消息 - system prompt 放在 system role
             check_system_prompt = self._read_check_system_prompt()
-            check_user_prompt = (
-                f"Initial user input query: {text_prompt}\n"
-                "You will receive three images in order:\n"
-                "1. the original image;\n"
-                "2. the whole-image mask overlay;\n"
-                "3. the zoomed-in review image, which contains two side-by-side panels: "
-                "a tight mask-focused crop and a larger context crop around the same candidate."
-            )
+            check_user_prompt = self._build_check_user_prompt(text_prompt)
 
             messages = [
                 {
