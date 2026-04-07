@@ -2,7 +2,7 @@ import json
 import time
 from datetime import datetime
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from config import Config
 from mllm_processor import MLLMProcessor
 from sam_processor import SAMProcessor
@@ -111,6 +111,32 @@ class MLLMSAMPipeline:
             rejected_indices = []
 
         return verdict, rejected_indices
+
+    def _append_tool_history(self, tool, verdict, result=None, note=None):
+        entry = {
+            "tool": tool,
+            "verdict": verdict,
+            "iteration": self.state["iteration"],
+        }
+
+        if isinstance(result, dict):
+            best_result = result.get("best_result") or {}
+            score = best_result.get("score")
+            if isinstance(score, (int, float)):
+                entry["score"] = float(score)
+
+            if note is None:
+                message = result.get("message")
+                if isinstance(message, str) and message.strip():
+                    note = message.strip()
+
+            if verdict == "Reject" and note is None and result.get("success"):
+                note = "mask rejected by evaluation"
+
+        if note:
+            entry["note"] = note
+
+        self.state["tool_history"].append(entry)
     
     def run(self, image_path, text_prompt, max_iterations=None):
         """
@@ -161,11 +187,11 @@ class MLLMSAMPipeline:
             
             if action == "report_no_mask":
                 print("经过仔细查看图片，未找到与查询相匹配的内容，结束流程")
-                self.state["tool_history"].append({
-                    "tool": "report_no_mask",
-                    "verdict": "NoMask",
-                    "iteration": self.state["iteration"],
-                })
+                self._append_tool_history(
+                    "report_no_mask",
+                    "NoMask",
+                    note="model reported that no matching object is present",
+                )
                 break
 
             elif action == "concept_generator":
@@ -175,11 +201,7 @@ class MLLMSAMPipeline:
                     query=self.state["original_text"],
                 )
                 verdict = self._process_segmentation_result(result, "concept_generator")
-                self.state["tool_history"].append({
-                    "tool": "concept_generator",
-                    "verdict": verdict,
-                    "iteration": self.state["iteration"],
-                })
+                self._append_tool_history("concept_generator", verdict, result=result)
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
@@ -193,11 +215,7 @@ class MLLMSAMPipeline:
                     query=self.state["original_text"],
                 )
                 verdict = self._process_segmentation_result(result, "object_locator")
-                self.state["tool_history"].append({
-                    "tool": "object_locator",
-                    "verdict": verdict,
-                    "iteration": self.state["iteration"],
-                })
+                self._append_tool_history("object_locator", verdict, result=result)
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
@@ -206,11 +224,7 @@ class MLLMSAMPipeline:
                 # 增强图像，放大图片和提示词交给分割模型生成mask，这个mask按照相应缩放比例再还原加到当前图像上
                 result = self.enhancer.enhance_image(self.state["original_image"], self.state["original_text"], self.sam, tool_params)
                 verdict = self._process_segmentation_result(result, "image_enhancer")
-                self.state["tool_history"].append({
-                    "tool": "image_enhancer",
-                    "verdict": verdict,
-                    "iteration": self.state["iteration"],
-                })
+                self._append_tool_history("image_enhancer", verdict, result=result)
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
@@ -220,11 +234,12 @@ class MLLMSAMPipeline:
                 # 直接将当前图和文本提示交给分割模型处理，得到带有mask的分割结果图片
                 result = self.sam.segment_with_text(self.state["original_image"], self.state["original_text"])
                 verdict = self._process_segmentation_result(result, "direct_segmentation")
-                self.state["tool_history"].append({
-                    "tool": f"unknown({action})",
-                    "verdict": verdict,
-                    "iteration": self.state["iteration"],
-                })
+                self._append_tool_history(
+                    f"unknown({action})",
+                    verdict,
+                    result=result,
+                    note=f"fallback after unsupported tool name: {action}",
+                )
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
@@ -270,6 +285,94 @@ class MLLMSAMPipeline:
         # 4. 在放大图上绘制
         return self.sam.visualize_masks_with_numbers(high_res_image, high_res_masks_data, draw_numbers)
 
+    def _resize_panel(self, image, panel_size):
+        resized = ImageOps.contain(image.convert("RGB"), panel_size, Image.Resampling.BICUBIC)
+        canvas = Image.new("RGB", panel_size, (255, 255, 255))
+        offset = (
+            (panel_size[0] - resized.width) // 2,
+            (panel_size[1] - resized.height) // 2,
+        )
+        canvas.paste(resized, offset)
+        return canvas
+
+    def _mask_to_bool(self, mask, target_size):
+        mask_np = np.squeeze(mask)
+        target_width, target_height = target_size
+        if mask_np.shape[:2] != (target_height, target_width):
+            mask_img = Image.fromarray((mask_np > 0.5).astype(np.uint8) * 255)
+            mask_img = mask_img.resize((target_width, target_height), Image.Resampling.NEAREST)
+            mask_np = np.array(mask_img) > 128
+        else:
+            mask_np = mask_np > 0.5
+        return mask_np
+
+    def _get_mask_bbox(self, mask, image_size):
+        mask_bool = self._mask_to_bool(mask, image_size)
+        if not mask_bool.any():
+            return None
+
+        y_coords, x_coords = np.where(mask_bool)
+        return (
+            int(x_coords.min()),
+            int(y_coords.min()),
+            int(x_coords.max()) + 1,
+            int(y_coords.max()) + 1,
+        )
+
+    def _expand_box(self, box, image_size, margin_ratio, min_margin):
+        img_width, img_height = image_size
+        x1, y1, x2, y2 = box
+        box_width = max(1, x2 - x1)
+        box_height = max(1, y2 - y1)
+        margin = int(max(min_margin, max(box_width, box_height) * margin_ratio))
+
+        return (
+            max(0, x1 - margin),
+            max(0, y1 - margin),
+            min(img_width, x2 + margin),
+            min(img_height, y2 + margin),
+        )
+
+    def create_zoomed_mask_review_image(self, original_image, mask, color):
+        """生成供评估使用的放大 review 图。左侧看紧致 mask，右侧看更大的上下文。"""
+        bbox = self._get_mask_bbox(mask, original_image.size)
+        if bbox is None:
+            return original_image.copy()
+
+        focus_box = self._expand_box(
+            bbox,
+            original_image.size,
+            margin_ratio=0.08,
+            min_margin=12,
+        )
+        context_box = self._expand_box(
+            bbox,
+            original_image.size,
+            margin_ratio=0.35,
+            min_margin=32,
+        )
+
+        focus_overlay = self.sam.visualize_masks_with_numbers(
+            original_image,
+            [{"mask": mask, "color": color, "id": 1}],
+            draw_numbers=False,
+        ).crop(focus_box)
+        context_crop = original_image.crop(context_box)
+
+        panel_size = (448, 448)
+        left_panel = self._resize_panel(focus_overlay, panel_size)
+        right_panel = self._resize_panel(context_crop, panel_size)
+
+        gap = 16
+        canvas = Image.new(
+            "RGB",
+            (panel_size[0] * 2 + gap, panel_size[1]),
+            (255, 255, 255),
+        )
+        canvas.paste(left_panel, (0, 0))
+        canvas.paste(right_panel, (panel_size[0] + gap, 0))
+        return canvas
+
     def _process_segmentation_result(self, result, method):
         """处理分割结果(公共逻辑)"""
         if not result or not result.get("success"):
@@ -302,12 +405,21 @@ class MLLMSAMPipeline:
                 self.state["original_image"],
                 masks_for_vis
             )
+            focus_color = self.get_color(len(candidates) - 1)
+            zoomed_review_image = self.create_zoomed_mask_review_image(
+                self.state["original_image"],
+                best_seg["mask"],
+                focus_color,
+            )
             
             # 保存中间结果用于检查
             timestamp = datetime.now().strftime("%H%M%S")
             save_path = Config.OUTPUT_DIR / f"iter{self.state['iteration']}_{method}_{timestamp}_check.jpg"
+            zoom_save_path = Config.OUTPUT_DIR / f"iter{self.state['iteration']}_{method}_{timestamp}_zoom.jpg"
             check_image.save(save_path)
+            zoomed_review_image.save(zoom_save_path)
             print(f"检查图像已保存: {save_path}")
+            print(f"放大检查图像已保存: {zoom_save_path}")
             
             # 评估结果
             print("调用MLLM评估分割质量...")
@@ -320,7 +432,8 @@ class MLLMSAMPipeline:
             evaluation_result = self.mllm.segmentation_evaluation(
                 self.state["original_image"],
                 check_image,
-                self.state["original_text"]
+                self.state["original_text"],
+                zoomed_image=zoomed_review_image,
             )
             verdict, rejected_indices = self._normalize_segmentation_evaluation_result(
                 evaluation_result

@@ -67,6 +67,7 @@ class MLLMProcessor:
             dict: 解析后的响应
             str: 原始文本
         """
+        temp_paths = []
         try:
             # 1. 准备并调整图像分辨率 (smart_resize_for_mllm)
             # 确保原始图像根据 Qwen2.5-VL 要求对齐 (28的倍数) 并尽可能放大
@@ -80,15 +81,13 @@ class MLLMProcessor:
             else:
                 original_pil = image
                 
-            aligned_original_image = smart_resize_for_mllm(original_pil)
+            aligned_original_image = smart_resize_for_mllm(ensure_rgb(original_pil))
             temp_original_image_path = Config.BASE_DIR / "temp_original_image_aligned.jpg"
             aligned_original_image.save(temp_original_image_path)
+            temp_paths.append(temp_original_image_path)
 
-            # 2. 准备用于画网格的底图 (同样进行放大和对齐处理)
-            if processed_image is not None:
-                base_image_for_grid = smart_resize_for_mllm(processed_image)
-            else:
-                base_image_for_grid = smart_resize_for_mllm(image)
+            # 2. 准备用于画网格的底图。网格始终绘制在原图上，已有 mask 作为独立上下文图传入。
+            base_image_for_grid = aligned_original_image.copy()
                 
             # 3. 绘制高清网格
             # 计算适合当前分辨率的动态Padding，并确保是对其的
@@ -117,6 +116,7 @@ class MLLMProcessor:
             
             grid_image_path = Config.BASE_DIR / "temp_grid_image.jpg"
             grid_processed_image.save(grid_image_path)
+            temp_paths.append(grid_image_path)
             
             # 图像分辨率控制参数
 
@@ -127,7 +127,38 @@ class MLLMProcessor:
 
             # 构建消息 - system prompt 放在 system role
             system_prompt_text = self._read_system_prompt()
-            user_prompt_text = self._build_user_prompt(text_prompt, tool_history)
+            has_mask_overlay = processed_image is not None
+            user_prompt_text = self._build_user_prompt(
+                text_prompt,
+                tool_history,
+                has_mask_overlay=has_mask_overlay,
+            )
+
+            user_content = [
+                {"type": "text", "text": user_prompt_text},
+                {
+                    "type": "image",
+                    "image": str(temp_original_image_path),
+                    **image_resolution_params,
+                },
+                {
+                    "type": "image",
+                    "image": str(grid_image_path),
+                    **image_resolution_params,
+                },
+            ]
+
+            if has_mask_overlay:
+                mask_overlay_image_path = Config.BASE_DIR / "temp_mask_overlay_image.jpg"
+                smart_resize_for_mllm(ensure_rgb(processed_image)).save(mask_overlay_image_path)
+                temp_paths.append(mask_overlay_image_path)
+                user_content.append(
+                    {
+                        "type": "image",
+                        "image": str(mask_overlay_image_path),
+                        **image_resolution_params,
+                    }
+                )
 
             messages = [
                 {
@@ -136,19 +167,7 @@ class MLLMProcessor:
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt_text},
-                        {
-                            "type": "image",
-                            "image": str(temp_original_image_path),
-                            **image_resolution_params,
-                        },
-                        {
-                            "type": "image",
-                            "image": str(grid_image_path),
-                            **image_resolution_params,
-                        },
-                    ],
+                    "content": user_content,
                 },
             ]
             
@@ -207,31 +226,58 @@ class MLLMProcessor:
                 "reason": f"处理错误: {str(e)[:100]}",
                 "tool_params": {}
             }, ""
+        finally:
+            for temp_path in temp_paths:
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError as cleanup_error:
+                    print(f"清理临时文件失败: {temp_path} -> {cleanup_error}")
     
     def _read_system_prompt(self):
         """读取 system prompt 文件内容"""
         with open(Config.SYSTEM_PROMPT, "r", encoding="utf-8") as f:
             return f.read()
 
-    def _build_user_prompt(self, text_prompt, tool_history=None):
+    def _build_user_prompt(self, text_prompt, tool_history=None, has_mask_overlay=False):
         """构建 user prompt，含查询文本和历史摘要"""
         parts = [f"Initial user input query: {text_prompt}"]
 
         if tool_history:
             parts.append("")
-            parts.append("=== IMPORTANT: PREVIOUS FAILED ATTEMPTS ===")
+            parts.append("=== IMPORTANT: PREVIOUS ATTEMPTS ===")
             for entry in tool_history:
+                details = []
+                score = entry.get("score")
+                if isinstance(score, (int, float)):
+                    details.append(f"score={float(score):.3f}")
+                note = entry.get("note")
+                if note:
+                    details.append(f"note={note}")
+                details_suffix = f" ({'; '.join(details)})" if details else ""
                 parts.append(
-                    f"- Iteration {entry['iteration']}: Called \"{entry['tool']}\" -> Result: {entry['verdict']}"
+                    f"- Iteration {entry['iteration']}: Called \"{entry['tool']}\" -> Result: {entry['verdict']}{details_suffix}"
                 )
             parts.append(
-                "WARNING: You MUST NOT call the same tool with similar parameters "
-                "if it was rejected above. Choose a DIFFERENT tool or significantly "
-                "different parameters."
+                "WARNING: If a previous attempt was rejected, you MUST NOT repeat the same "
+                "tool with near-identical parameters. Choose a DIFFERENT tool or make a "
+                "substantial change in points, concepts, or crop region."
+            )
+            parts.append(
+                "Treat previous tool outputs as hypotheses, not proof. Re-check the original image carefully."
             )
             parts.append("===")
 
-        parts.append("Below are the original image and the image with grid respectively")
+        parts.append("")
+        if has_mask_overlay:
+            parts.append(
+                "Below are the original image, the image with grid, and the current accepted-mask overlay image respectively."
+            )
+            parts.append(
+                "The accepted-mask overlay image is context from previous iterations. Inspect it critically instead of assuming it is correct."
+            )
+        else:
+            parts.append("Below are the original image and the image with grid respectively")
         return "\n".join(parts)
 
     def get_prompt_text(self, text_prompt):
@@ -250,19 +296,22 @@ class MLLMProcessor:
         system_prompt = self._read_check_system_prompt()
         user_prompt = (
             f"Initial user input query: {text_prompt}\n"
-            "Below are the original image and the image overlaid "
-            "with the predicted segmentation mask respectively:"
+            "Below are the original image, the whole-image mask overlay, "
+            "and the zoomed-in review image respectively:"
         )
         return system_prompt + "\n\n" + user_prompt
         
-    def segmentation_evaluation(self, original_image, masked_image, text_prompt):
+    def segmentation_evaluation(self, original_image, masked_image, text_prompt, zoomed_image=None):
         """评估分割结果，返回Accept或Reject"""
         eval_orig_path = Config.BASE_DIR / "temp_eval_orig.jpg"
         eval_mask_path = Config.BASE_DIR / "temp_eval_mask.jpg"
+        eval_zoom_path = Config.BASE_DIR / "temp_eval_zoom.jpg"
         try:
             # 保存临时图像
             original_image.save(eval_orig_path)
             masked_image.save(eval_mask_path)
+            zoom_source = zoomed_image if zoomed_image is not None else masked_image
+            zoom_source.save(eval_zoom_path)
 
             image_resolution_params = {
                 "min_pixels": Config.MLLM_MIN_PIXELS,
@@ -273,8 +322,8 @@ class MLLMProcessor:
             check_system_prompt = self._read_check_system_prompt()
             check_user_prompt = (
                 f"Initial user input query: {text_prompt}\n"
-                "Below are the original image and the image overlaid "
-                "with the predicted segmentation mask respectively:"
+                "Below are the original image, the whole-image mask overlay, "
+                "and the zoomed-in review image respectively:"
             )
 
             messages = [
@@ -294,6 +343,11 @@ class MLLMProcessor:
                         {
                             "type": "image",
                             "image": str(eval_mask_path),
+                            **image_resolution_params,
+                        },
+                        {
+                            "type": "image",
+                            "image": str(eval_zoom_path),
                             **image_resolution_params,
                         },
                     ],
@@ -371,7 +425,7 @@ class MLLMProcessor:
             traceback.print_exc()
             return "Reject", []
         finally:
-            for temp_path in (eval_orig_path, eval_mask_path):
+            for temp_path in (eval_orig_path, eval_mask_path, eval_zoom_path):
                 try:
                     if temp_path.exists():
                         temp_path.unlink()

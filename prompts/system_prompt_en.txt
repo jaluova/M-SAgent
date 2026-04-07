@@ -22,7 +22,8 @@ Parameters: {"type": "object", "properties": {"points": {"type": "array", "descr
 Rules:
 - Always provide at least one fallback point with label 1 on the target object.
 - Look at the grid image carefully. Use grid intersection coordinates [col, row] where col is 0-5 (left to right) and row is 0-5 (top to bottom).
-- This is the primary tool. Try it first for most queries.
+- Use this when the target is already visually obvious and reasonably large, and the main challenge is selecting the correct instance by position.
+- Do not default to this tool for tiny, highly local, or visually ambiguous targets.
 
 2. concept_generator
 Description: Segments the image by trying multiple simple noun-phrase concepts with SAM3 text-based segmentation. Returns the best-scoring result.
@@ -30,6 +31,7 @@ Parameters: {"type": "object", "properties": {"new_concepts": {"type": "array", 
 Rules:
 - Each concept must be a simple noun phrase. Do not use full sentences, articles, possessives, or numbers.
 - Provide diverse concepts: try both general category names (e.g. "person") and specific visual descriptions (e.g. "girl in pink shirt").
+- Prefer this when wording or category phrasing is the main source of uncertainty, or when alternative descriptions may separate the target from nearby distractors.
 - If object_locator failed, this is a good alternative. Use different noun phrases than what failed before.
 
 3. image_enhancer
@@ -57,13 +59,16 @@ Scenario 1 (first iteration — only original image and grid image, no existing 
 Steps inside <think>:
 1. Analyze: Describe what you see in the images relevant to the query.
 2. Think: Identify the actual grounding target based on the rules above. Remember: ground the whole target object, not attributes.
-3. Decide: Choose which tool to call and determine the parameters. If the target is tiny, highly local, or easy to confuse with nearby larger objects, prefer image_enhancer with a rectangle that tightly covers the whole target plus margin.
+3. Decide: Choose which tool to call and determine the parameters.
+Use image_enhancer when the target is tiny, highly local, thin, distant, or easy to confuse with nearby larger objects.
+Use object_locator when the target is medium/large, already visible, and a few points can reliably land on the correct instance.
+Use concept_generator when alternative noun phrases are likely to be more informative than point localization.
 
 Scenario 2 (subsequent iterations — original image, grid image, and an image with existing mask overlays):
 Steps inside <think>:
-1. Analyze: Examine both the original image and the mask overlay image. Identify each numbered mask and whether it correctly covers the target.
-2. Think: Determine which targets are covered, which are missing, and whether to avoid certain already-covered areas.
-3. Decide: Choose the next tool and parameters. If all targets are found, you may stop.
+1. Analyze: Examine the original image, the grid image, and the mask overlay image together. Identify each numbered mask and whether it truly covers the target.
+2. Think: Existing masks are context, not proof. Determine which targets are correctly covered, which are missing, and which prior attempts appear misleading.
+3. Decide: Choose the next tool and parameters. Do not blindly trust earlier tool outputs just because a tool produced them.
 
 
 Output format:

@@ -20,6 +20,7 @@ class EvaluationContractTests(unittest.TestCase):
             FailingImage(),
             FailingImage(),
             "truck",
+            zoomed_image=FailingImage(),
         )
 
         self.assertEqual(verdict, "Reject")
@@ -81,3 +82,24 @@ class EvaluationContractTests(unittest.TestCase):
         self.assertEqual(parsed["name"], "object_locator")
         self.assertEqual(parsed["parameters"]["points"], [[4, 2], [4, 3], [5, 2]])
         self.assertEqual(parsed["parameters"]["labels"], [1, 1, 1])
+
+    def test_build_user_prompt_includes_history_details_and_overlay_context(self):
+        processor = MLLMProcessor.__new__(MLLMProcessor)
+
+        prompt = processor._build_user_prompt(
+            "truck",
+            tool_history=[
+                {
+                    "tool": "object_locator",
+                    "verdict": "Reject",
+                    "iteration": 1,
+                    "score": 0.8123,
+                    "note": "mask rejected by evaluation",
+                }
+            ],
+            has_mask_overlay=True,
+        )
+
+        self.assertIn("score=0.812", prompt)
+        self.assertIn("note=mask rejected by evaluation", prompt)
+        self.assertIn("current accepted-mask overlay image", prompt)
