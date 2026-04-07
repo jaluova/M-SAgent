@@ -70,3 +70,14 @@ class EvaluationContractTests(unittest.TestCase):
 
         self.assertEqual(parsed["name"], "image_enhancer")
         self.assertEqual(parsed["parameters"]["rectangular area"], [[2, 2], [4, 4]])
+
+    def test_parse_response_accepts_direct_tool_tag_attributes(self):
+        processor = MLLMProcessor.__new__(MLLMProcessor)
+
+        parsed = processor._parse_response(
+            '<object_locator points="[[4, 2], [4, 3], [5, 2]]" labels="[1, 1, 1]"></object_locator>'
+        )
+
+        self.assertEqual(parsed["name"], "object_locator")
+        self.assertEqual(parsed["parameters"]["points"], [[4, 2], [4, 3], [5, 2]])
+        self.assertEqual(parsed["parameters"]["labels"], [1, 1, 1])

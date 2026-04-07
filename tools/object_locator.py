@@ -12,6 +12,20 @@ from utils.localization import LocalizationResult
 
 class ObjectLocator:
     """目标定位工具"""
+    PERSON_QUERY_TERMS = (
+        "person",
+        "man",
+        "woman",
+        "boy",
+        "girl",
+        "guy",
+        "lady",
+        "child",
+        "kid",
+        "people",
+        "player",
+        "skater",
+    )
     
     def __init__(self, mllm_processor, train_adapter_client=None, embedded_localizer=None, config=Config):
         self.mllm = mllm_processor
@@ -76,6 +90,12 @@ class ObjectLocator:
             return {"success": False, "message": fallback_reason or "No valid localization points"}
 
         points = localization.absolute_points
+        points, labels = self._expand_point_prompts(
+            points=points,
+            labels=labels,
+            image_size=image.size,
+            query=query,
+        )
         if service_meta:
             service_device = service_meta.get("service_device", "unknown")
             slow_path = " (slow path)" if service_meta.get("slow_path") else ""
@@ -249,6 +269,62 @@ class ObjectLocator:
         localization = self._build_hint_localization(points, labels, image.size)
         return localization, labels, fallback_reason, service_meta
 
+    def _expand_point_prompts(self, points, labels, image_size, query=None):
+        if not points or not labels or len(points) != len(labels):
+            return points, labels
+
+        if not self._is_person_like_query(query):
+            return points, labels
+
+        foreground_points = [point for point, label in zip(points, labels) if int(label) == 1]
+        if not foreground_points or len(points) >= self.config.MAX_POINTS:
+            return points, labels
+
+        width, height = image_size
+        fg = np.asarray(foreground_points, dtype=np.float32)
+        centroid = fg.mean(axis=0)
+        min_xy = fg.min(axis=0)
+        max_xy = fg.max(axis=0)
+        span = np.maximum(max_xy - min_xy, np.array([width * 0.04, height * 0.06], dtype=np.float32))
+
+        horizontal_offset = max(float(span[0]) * 0.8, width * 0.05)
+        upper_offset = max(float(span[1]) * 1.5, height * 0.10)
+        lower_offset = max(float(span[1]) * 2.0, height * 0.18)
+        shoulder_drop = max(float(span[1]) * 0.25, height * 0.03)
+
+        candidates = [
+            [centroid[0], centroid[1] - upper_offset],
+            [centroid[0], centroid[1] + lower_offset],
+            [centroid[0] - horizontal_offset, centroid[1] + shoulder_drop],
+            [centroid[0] + horizontal_offset, centroid[1] + shoulder_drop],
+        ]
+
+        expanded_points = [list(map(float, point)) for point in points]
+        expanded_labels = [int(label) for label in labels]
+        min_distance = max(min(width, height) * 0.04, 18.0)
+
+        for candidate in candidates:
+            if len(expanded_points) >= self.config.MAX_POINTS:
+                break
+
+            clamped = [
+                float(min(max(candidate[0], 2.0), width - 2.0)),
+                float(min(max(candidate[1], 2.0), height - 2.0)),
+            ]
+            if self._point_is_near_existing(clamped, expanded_points, min_distance):
+                continue
+
+            expanded_points.append(clamped)
+            expanded_labels.append(1)
+
+        if len(expanded_points) != len(points):
+            print(
+                "人体查询自动扩展 SAM 点提示: "
+                f"{len(points)} -> {len(expanded_points)}"
+            )
+
+        return expanded_points, expanded_labels
+
     def _build_hint_localization(self, points, labels, image_size):
         width, height = image_size
         normalized_points = []
@@ -301,6 +377,21 @@ class ObjectLocator:
         if points:
             print(f"转换后的像素点({len(points)}个): {points}")
         return points, valid_labels
+
+    def _is_person_like_query(self, query):
+        if not query:
+            return False
+
+        lowered = str(query).lower()
+        return any(term in lowered for term in self.PERSON_QUERY_TERMS)
+
+    @staticmethod
+    def _point_is_near_existing(candidate, existing_points, min_distance):
+        cx, cy = candidate
+        for ex, ey in existing_points:
+            if ((ex - cx) ** 2 + (ey - cy) ** 2) ** 0.5 < min_distance:
+                return True
+        return False
 
     @staticmethod
     def _keep_component_at_point(mask, point):

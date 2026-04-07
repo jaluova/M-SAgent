@@ -192,6 +192,50 @@ class ObjectLocatorTests(unittest.TestCase):
             self.assertEqual(len(sam.calls[0]["points"]), count)
             self.assertEqual(sam.calls[0]["labels"], [1] * count)
 
+    def test_person_query_expands_foreground_prompts_for_sam(self):
+        localization = LocalizationResult(
+            absolute_points=[[250.0, 120.0]],
+            normalized_points=[[0.5, 0.4]],
+            scores=[0.9],
+            selection_mode="dynamic_topk",
+            selected_k=1,
+            source="gridground_embedded",
+        )
+        locator = ObjectLocator(
+            None,
+            embedded_localizer=FakeEmbeddedLocalizer(result=localization),
+        )
+        locator.localization_backend = "embedded"
+
+        result = locator.locate_referent({}, self.image, self.sam, query="person on the right")
+
+        self.assertTrue(result["success"])
+        self.assertGreater(len(self.sam.calls[0]["points"]), 1)
+        self.assertIn([250.0, 120.0], self.sam.calls[0]["points"])
+        self.assertEqual(self.sam.calls[0]["labels"][0], 1)
+
+    def test_non_person_query_keeps_original_prompt_count(self):
+        localization = LocalizationResult(
+            absolute_points=[[250.0, 120.0]],
+            normalized_points=[[0.5, 0.4]],
+            scores=[0.9],
+            selection_mode="dynamic_topk",
+            selected_k=1,
+            source="gridground_embedded",
+        )
+        sam = FakeSAMProcessor()
+        locator = ObjectLocator(
+            None,
+            embedded_localizer=FakeEmbeddedLocalizer(result=localization),
+        )
+        locator.localization_backend = "embedded"
+
+        result = locator.locate_referent({}, self.image, sam, query="skateboard")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(len(sam.calls[0]["points"]), 1)
+        self.assertEqual(sam.calls[0]["points"][0], [250.0, 120.0])
+
     def test_disabled_train_adapter_keeps_fallback_behavior(self):
         locator = ObjectLocator(None, train_adapter_client=FakeTrainAdapterClient())
 
