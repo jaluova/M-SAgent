@@ -36,6 +36,8 @@ Description: Crops and enlarges a region of the image, then runs SAM3 segmentati
 Parameters: {"type": "object", "properties": {"rectangular area": {"type": "array", "description": "Two grid points defining the crop rectangle: [[col1, row1], [col2, row2]] on the 5x5 grid", "items": {"type": "array", "items": {"type": "integer"}}}}, "required": ["rectangular area"]}
 Rules:
 - Use this when the target is small or in a cluttered region.
+- Do NOT use this for large, clearly visible objects that already occupy a substantial part of the image. Prefer object_locator for those.
+- The rectangle must cover the whole target plus margin. If any part of the target likely extends outside the rectangle, do not choose image_enhancer.
 - The rectangle should cover the target with some margin. Grid coordinates: columns 0-5, rows 0-5.
 
 4. report_no_mask

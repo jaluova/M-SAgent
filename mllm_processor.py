@@ -4,8 +4,6 @@ import re
 import base64
 import html
 from io import BytesIO
-import re
-import json
 from PIL import Image
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
@@ -403,7 +401,9 @@ class MLLMProcessor:
     def _parse_tool_json_body(self, body):
         json_str = html.unescape(body.strip())
         if json_str.startswith("```"):
-            json_str = json_str.strip("`").strip("json").strip()
+            json_str = re.sub(r"^```(?:json)?\s*", "", json_str, flags=re.IGNORECASE)
+            json_str = re.sub(r"\s*```$", "", json_str)
+        json_str = json_str.rstrip(" \t\r\n;")
         try:
             return json.loads(json_str)
         except json.JSONDecodeError:

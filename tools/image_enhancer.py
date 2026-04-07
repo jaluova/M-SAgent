@@ -7,6 +7,9 @@ from datetime import datetime
 
 class ImageEnhancer:
     """图像增强工具"""
+
+    EDGE_CONTACT_BORDER_PX = 3
+    EDGE_CONTACT_MIN_FRACTION = 0.05
     
     def __init__(self):
         self.grid_rows = Config.GRID_ROWS
@@ -65,6 +68,22 @@ class ImageEnhancer:
              return None
              
         mask_relative = best_result["mask"] # mask relative to enhanced_image
+
+        truncated, edge_fractions = self._mask_looks_truncated(
+            mask_relative,
+            crop_box,
+            image.size,
+        )
+        if truncated:
+            print(
+                "增强分割结果疑似被裁剪框截断，拒绝当前 image_enhancer 结果: "
+                f"{edge_fractions}"
+            )
+            return {
+                "success": False,
+                "message": "Enhanced crop likely truncates the target object",
+                "results": [],
+            }
         
         # 5. 还原 Mask 到原图尺寸坐标
         full_mask = self._restore_mask(mask_relative, crop_box, image.size)
@@ -155,6 +174,44 @@ class ImageEnhancer:
                  return None
 
         return None
+
+    def _mask_looks_truncated(self, mask, crop_box, full_size):
+        """检测 mask 是否明显贴着非图像边界的 crop 边缘。"""
+        mask_array = np.asarray(mask)
+        if mask_array.ndim == 3:
+            mask_array = mask_array.squeeze()
+        mask_bool = mask_array > 0.5
+        if mask_bool.ndim != 2 or not np.any(mask_bool):
+            return False, {}
+
+        border = min(
+            self.EDGE_CONTACT_BORDER_PX,
+            max(1, mask_bool.shape[0] // 4),
+            max(1, mask_bool.shape[1] // 4),
+        )
+
+        edge_fractions = {
+            "left": float(np.any(mask_bool[:, :border], axis=1).mean()),
+            "right": float(np.any(mask_bool[:, -border:], axis=1).mean()),
+            "top": float(np.any(mask_bool[:border, :], axis=0).mean()),
+            "bottom": float(np.any(mask_bool[-border:, :], axis=0).mean()),
+        }
+
+        x1, y1, x2, y2 = crop_box
+        full_width, full_height = full_size
+        edge_is_internal = {
+            "left": x1 > 0,
+            "right": x2 < full_width,
+            "top": y1 > 0,
+            "bottom": y2 < full_height,
+        }
+
+        truncated_edges = [
+            edge
+            for edge, fraction in edge_fractions.items()
+            if edge_is_internal[edge] and fraction >= self.EDGE_CONTACT_MIN_FRACTION
+        ]
+        return bool(truncated_edges), edge_fractions
 
     def _restore_mask(self, mask, crop_box, full_size):
         """将局部mask还原到全图尺寸"""
