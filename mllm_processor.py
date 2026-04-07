@@ -12,6 +12,13 @@ from utils.image_utils import add_grid_to_image, resize_image, ensure_rgb, smart
 from utils.shared_qwen_backbone import SharedQwenBackbone
 
 class MLLMProcessor:
+    SUPPORTED_TOOL_NAMES = {
+        "object_locator",
+        "concept_generator",
+        "image_enhancer",
+        "report_no_mask",
+    }
+
     def __init__(self):
         self.device = Config.DEVICE
         self.model, self.processor = self._load_model()
@@ -374,22 +381,26 @@ class MLLMProcessor:
     
     
     def _parse_response(self, text):
-        """解析模型响应，兼容 JSON 体和属性式 <tool> 调用格式。"""
+        """解析模型响应，兼容标准 <tool> 和直接工具标签格式。"""
         try:
-            match = re.search(r"<tool\b([^>]*)>(.*?)</tool>", text, re.DOTALL)
-            if match:
-                attrs = (match.group(1) or "").strip()
-                body = (match.group(2) or "").strip()
+            tag_pattern = re.compile(
+                r"<(?P<tag>[a-zA-Z_][\w-]*)\b(?P<attrs>[^>]*)>(?P<body>.*?)</(?P=tag)>",
+                re.DOTALL,
+            )
+            for match in tag_pattern.finditer(text):
+                tag = (match.group("tag") or "").strip()
+                attrs = (match.group("attrs") or "").strip()
+                body = (match.group("body") or "").strip()
 
-                if body:
-                    parsed = self._parse_tool_json_body(body)
-                    if parsed is not None:
-                        return parsed
+                if tag == "tool":
+                    parsed = self._parse_standard_tool_tag(attrs, body)
+                elif tag in self.SUPPORTED_TOOL_NAMES:
+                    parsed = self._parse_direct_tool_tag(tag, attrs, body)
+                else:
+                    parsed = None
 
-                if attrs:
-                    parsed = self._parse_tool_attributes(attrs)
-                    if parsed is not None:
-                        return parsed
+                if parsed is not None:
+                    return parsed
 
             print("未找到<tool>标签")
             return self._get_default_response()
@@ -397,6 +408,32 @@ class MLLMProcessor:
         except Exception as e:
             print(f"解析响应失败: {e}")
             return self._get_default_response()
+
+    def _parse_standard_tool_tag(self, attrs, body):
+        if body:
+            parsed = self._parse_tool_json_body(body)
+            if parsed is not None:
+                return parsed
+
+        if attrs:
+            return self._parse_tool_attributes(attrs)
+
+        return None
+
+    def _parse_direct_tool_tag(self, tag, attrs, body):
+        parameters = self._parse_named_attributes(attrs)
+        if parameters is None:
+            return None
+
+        if body:
+            body_parameters = self._parse_tool_json_body(body)
+            if isinstance(body_parameters, dict):
+                parameters.update(body_parameters)
+
+        return {
+            "name": tag,
+            "parameters": parameters,
+        }
 
     def _parse_tool_json_body(self, body):
         json_str = html.unescape(body.strip())
@@ -426,6 +463,20 @@ class MLLMProcessor:
             "name": name,
             "parameters": parameters,
         }
+
+    def _parse_named_attributes(self, attrs):
+        parameters = {}
+        for key, quote, raw_value in re.findall(r"""([a-zA-Z_][\w-]*)\s*=\s*(['"])(.*?)\2""", attrs, re.DOTALL):
+            if key in {"name", "parameters"}:
+                continue
+
+            value_text = html.unescape(raw_value.strip())
+            try:
+                parameters[key] = json.loads(value_text)
+            except json.JSONDecodeError:
+                parameters[key] = value_text
+
+        return parameters
 
     def _get_default_response(self):
         """解析失败时的默认响应：用 concept_generator 重试，而非直接终止"""
