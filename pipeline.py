@@ -43,14 +43,15 @@ class MLLMSAMPipeline:
         # 状态跟踪
         self.state = {
             "original_image": None, #原始输入图像
-            "current_image": None,  
+            "current_image": None,
             "original_text": "",
             "current_text": "",
             "final_image":None,
             "grid_info": None,
-            "iteration": 0, 
+            "iteration": 0,
             "results": [],
             "accepted_masks": [], # List of {'mask': ..., 'score': ..., 'method': ...}
+            "tool_history": [],   # List of {'tool': ..., 'verdict': ..., 'iteration': ...}
         }
         
         print("初始化完成")
@@ -148,7 +149,8 @@ class MLLMSAMPipeline:
                 self.state["grid_info"],
                 image_path,
                 self.state["iteration"],
-                self.state["current_image"]
+                self.state["current_image"],
+                tool_history=self.state["tool_history"],
             )
             
             print(f"MLLM决策: {mllm_response.get('name')}")
@@ -159,16 +161,26 @@ class MLLMSAMPipeline:
             
             if action == "report_no_mask":
                 print("经过仔细查看图片，未找到与查询相匹配的内容，结束流程")
+                self.state["tool_history"].append({
+                    "tool": "report_no_mask",
+                    "verdict": "NoMask",
+                    "iteration": self.state["iteration"],
+                })
                 break
-                    
+
             elif action == "concept_generator":
                 # 生成概念，得到生成的每个concept对应的带有mask的分割结果图片
                 result = self.concept_gen.segment_with_concept(tool_params, self.sam, self.state["original_image"])
                 verdict = self._process_segmentation_result(result, "concept_generator")
-                if verdict == "Accept": 
+                self.state["tool_history"].append({
+                    "tool": "concept_generator",
+                    "verdict": verdict,
+                    "iteration": self.state["iteration"],
+                })
+                if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
-                
+
             elif action == "object_locator":
                 # 定位目标，得到使用点提示的带有mask的分割结果图片
                 result = self.locator.locate_referent(
@@ -178,23 +190,38 @@ class MLLMSAMPipeline:
                     query=self.state["original_text"],
                 )
                 verdict = self._process_segmentation_result(result, "object_locator")
+                self.state["tool_history"].append({
+                    "tool": "object_locator",
+                    "verdict": verdict,
+                    "iteration": self.state["iteration"],
+                })
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
-                
+
             elif action == "image_enhancer":
                 # 增强图像，放大图片和提示词交给分割模型生成mask，这个mask按照相应缩放比例再还原加到当前图像上
                 result = self.enhancer.enhance_image(self.state["original_image"], self.state["original_text"], self.sam, tool_params)
                 verdict = self._process_segmentation_result(result, "image_enhancer")
+                self.state["tool_history"].append({
+                    "tool": "image_enhancer",
+                    "verdict": verdict,
+                    "iteration": self.state["iteration"],
+                })
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break
-                
+
             else:
                 print(f"未知操作: {action}, 尝试直接分割")
                 # 直接将当前图和文本提示交给分割模型处理，得到带有mask的分割结果图片
                 result = self.sam.segment_with_text(self.state["original_image"], self.state["original_text"])
                 verdict = self._process_segmentation_result(result, "direct_segmentation")
+                self.state["tool_history"].append({
+                    "tool": f"unknown({action})",
+                    "verdict": verdict,
+                    "iteration": self.state["iteration"],
+                })
                 if verdict == "Accept":
                     print("MLLM接受当前结果，结束流程")
                     break

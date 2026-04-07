@@ -46,17 +46,17 @@ class MLLMProcessor:
             print(f"加载模型失败: {e}")
             raise
     
-    def process(self, image, text_prompt,grid_info,image_path,iteration=1, processed_image=None):
+    def process(self, image, text_prompt, grid_info, image_path, iteration=1, processed_image=None, tool_history=None):
         """
         处理图像和文本输入
-        
+
         Args:
             image: PIL Image
             text_prompt: 文本提示
             iteration: 当前迭代次数
-            processed_image: 处理后的图像
-            processed_image如果是None的话，代表是第一次迭代
-            
+            processed_image: 处理后的图像（None 代表第一次迭代）
+            tool_history: 之前迭代的工具调用历史
+
         Returns:
             dict: 解析后的响应
             str: 原始文本
@@ -119,27 +119,31 @@ class MLLMProcessor:
                 "max_pixels": Config.MLLM_MAX_PIXELS,
             }
 
-            # 构建消息 - 按照官方文档格式
+            # 构建消息 - system prompt 放在 system role
+            system_prompt_text = self._read_system_prompt()
+            user_prompt_text = self._build_user_prompt(text_prompt, tool_history)
+
             messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": system_prompt_text}],
+                },
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text", 
-                            "text": self.get_prompt_text(text_prompt)
-                        },
+                        {"type": "text", "text": user_prompt_text},
                         {
                             "type": "image",
                             "image": str(temp_original_image_path),
-                            **image_resolution_params
+                            **image_resolution_params,
                         },
                         {
                             "type": "image",
                             "image": str(grid_image_path),
-                            **image_resolution_params
+                            **image_resolution_params,
                         },
                     ],
-                }
+                },
             ]
             
             # 准备推理 - 按照官方文档
@@ -198,24 +202,49 @@ class MLLMProcessor:
                 "tool_params": {}
             }, ""
     
-    def get_prompt_text(self, text_prompt):
-        """获取完整的提示词文本"""
+    def _read_system_prompt(self):
+        """读取 system prompt 文件内容"""
         with open(Config.SYSTEM_PROMPT, "r", encoding="utf-8") as f:
-            system_prompt = f.read()
-        user_prompt = f"""
-Initial user input query: {text_prompt}
-Below are the original image and the image  with grid respectively"""
-        
-        return system_prompt+"\n\n"+user_prompt
+            return f.read()
+
+    def _build_user_prompt(self, text_prompt, tool_history=None):
+        """构建 user prompt，含查询文本和历史摘要"""
+        parts = [f"Initial user input query: {text_prompt}"]
+
+        if tool_history:
+            history_lines = []
+            for entry in tool_history:
+                history_lines.append(
+                    f"Iter{entry['iteration']}: {entry['tool']} -> {entry['verdict']}"
+                )
+            parts.append(
+                "Previous attempts: [" + ", ".join(history_lines) + "]. "
+                "Avoid repeating failed strategies; try a different tool or parameters."
+            )
+
+        parts.append("Below are the original image and the image with grid respectively")
+        return "\n".join(parts)
+
+    def get_prompt_text(self, text_prompt):
+        """获取完整的提示词文本（保留向后兼容）"""
+        system_prompt = self._read_system_prompt()
+        user_prompt = self._build_user_prompt(text_prompt)
+        return system_prompt + "\n\n" + user_prompt
     
-    def get_check_prompt(self,text_prompt):
-        """获取用于迭代检查的提示词文本"""
+    def _read_check_system_prompt(self):
+        """读取迭代检查的 system prompt"""
         with open(Config.SYSTEM_PROMPT_ITERATIVE_CHECKING, "r", encoding="utf-8") as f:
-            system_prompt = f.read()
-        
-        user_prompt = f"""Initial user input query: {text_prompt}
-    Below are the original image and the image overlaid with the predicted segmentation mask respectively:"""
-        return system_prompt+"\n\n"+user_prompt
+            return f.read()
+
+    def get_check_prompt(self, text_prompt):
+        """获取用于迭代检查的提示词文本（保留向后兼容）"""
+        system_prompt = self._read_check_system_prompt()
+        user_prompt = (
+            f"Initial user input query: {text_prompt}\n"
+            "Below are the original image and the image overlaid "
+            "with the predicted segmentation mask respectively:"
+        )
+        return system_prompt + "\n\n" + user_prompt
         
     def segmentation_evaluation(self, original_image, masked_image, text_prompt):
         """评估分割结果，返回Accept或Reject"""
@@ -225,20 +254,41 @@ Below are the original image and the image  with grid respectively"""
             # 保存临时图像
             original_image.save(eval_orig_path)
             masked_image.save(eval_mask_path)
-            
-            # 构建消息 - 按照官方文档格式
+
+            image_resolution_params = {
+                "min_pixels": Config.MLLM_MIN_PIXELS,
+                "max_pixels": Config.MLLM_MAX_PIXELS,
+            }
+
+            # 构建消息 - system prompt 放在 system role
+            check_system_prompt = self._read_check_system_prompt()
+            check_user_prompt = (
+                f"Initial user input query: {text_prompt}\n"
+                "Below are the original image and the image overlaid "
+                "with the predicted segmentation mask respectively:"
+            )
+
             messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": check_system_prompt}],
+                },
                 {
                     "role": "user",
                     "content": [
+                        {"type": "text", "text": check_user_prompt},
                         {
-                            "type": "text", 
-                            "text": self.get_check_prompt(text_prompt)
+                            "type": "image",
+                            "image": str(eval_orig_path),
+                            **image_resolution_params,
                         },
-                        {"type": "image","image": str(eval_orig_path),},
-                        {"type": "image","image": str(eval_mask_path),},
+                        {
+                            "type": "image",
+                            "image": str(eval_mask_path),
+                            **image_resolution_params,
+                        },
                     ],
-                }
+                },
             ]
             
             # 准备推理 - 按照官方文档
@@ -341,11 +391,14 @@ Below are the original image and the image  with grid respectively"""
             return self._get_default_response()
 
     def _get_default_response(self):
-        """获取默认响应"""
-        print("未找到有效操作，使用默认响应")
+        """解析失败时的默认响应：用 concept_generator 重试，而非直接终止"""
+        print("未找到有效操作，回退到 concept_generator 重试")
         return {
-            "name": "report_no_mask",
-            "parameters": {}
+            "name": "concept_generator",
+            "parameters": {
+                "new_concepts": [],
+                "num_concepts": 0,
+            },
         }
     
 
