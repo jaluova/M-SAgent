@@ -8,16 +8,36 @@ class ConceptGenerator:
     def __init__(self, mllm_processor):
         self.mllm = mllm_processor
         
-    def segment_with_concept(self, tool_params, sam_processor, image):
+    def segment_with_concept(self, tool_params, sam_processor, image, query=None):
         """使用生成的概念进行分割
         Args:
             tool_params (dict): 来自MLLM的工具参数，包含概念列表等
             sam_processor: SAM处理器
             image: 待分割图像
+            query: 原始用户查询文本，作为最终 fallback concept
         Returns:
             dict: 概念分割结果
         """
         new_concepts = tool_params.get("new_concepts", [])
+
+        # 参数容错：MLLM 可能用了错误的 key 名
+        if not new_concepts:
+            for fallback_key in ("text", "concept", "text_prompt", "query", "prompt"):
+                fallback_val = tool_params.get(fallback_key)
+                if fallback_val:
+                    if isinstance(fallback_val, str):
+                        new_concepts = [fallback_val]
+                    elif isinstance(fallback_val, list):
+                        new_concepts = [str(v) for v in fallback_val if v]
+                    if new_concepts:
+                        print(f"concept_generator: 从参数 '{fallback_key}' 提取到概念: {new_concepts}")
+                        break
+
+        # 最终兜底：用原始查询作为 concept
+        if not new_concepts and query:
+            new_concepts = [query]
+            print(f"concept_generator: 使用原始查询作为 fallback concept: {query}")
+
         num_concepts = tool_params.get("num_concepts", len(new_concepts))
 
         print(f"提取到的概念列表: {new_concepts}")

@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import time
+import cv2
 from PIL import ImageDraw
 from config import Config
 from datetime import datetime
@@ -126,16 +127,28 @@ class ObjectLocator:
                 labels=labels,
                 multimask_output=True
             )
-            
+
+            # 连通域过滤：只保留包含最高置信度点的连通区域
+            if result.get("success") and result.get("best_result"):
+                top_point = localization.absolute_points[0]  # 按置信度排序，第一个最高
+                for res in result["results"]:
+                    res["mask"] = self._keep_component_at_point(
+                        res["mask"], top_point,
+                    )
+                # 重新计算 mask_area 和 best_result
+                for res in result["results"]:
+                    res["mask_area"] = int(np.sum(res["mask"] > 0.5))
+                result["best_result"] = max(
+                    result["results"], key=lambda x: x["score"],
+                )
+
             # 保存分割结果可视化
             if result.get("success") and result.get("best_result"):
                 try:
                     best_mask = result["best_result"]["mask"]
-                    # 应用MASK
                     vis_image = sam_processor.apply_mask_to_image(image, best_mask)
-                    # 叠加点
                     vis_image = self.visualize_points(vis_image, points, labels)
-                    
+
                     vis_path = self.config.TOOL_CALLS_LOG / f"object_locator_result_{timestamp}.jpg"
                     vis_image.save(vis_path)
                     print(f"定位分割结果已保存: {vis_path}")
@@ -283,6 +296,44 @@ class ObjectLocator:
         if points:
             print(f"转换后的像素点({len(points)}个): {points}")
         return points, valid_labels
+
+    @staticmethod
+    def _keep_component_at_point(mask, point):
+        """保留包含指定点的连通区域，去掉被杂点拉进来的分离区域。
+
+        Args:
+            mask: numpy array (H, W), 分割结果
+            point: [x, y] 最高置信度点的绝对坐标
+
+        Returns:
+            numpy array (H, W), 过滤后的 mask
+        """
+        mask_binary = (np.squeeze(mask) > 0.5).astype(np.uint8)
+        num_labels, labels_map = cv2.connectedComponents(mask_binary)
+        if num_labels <= 2:
+            # 只有背景 + 1 个连通域，无需过滤
+            return mask
+
+        px, py = int(round(point[0])), int(round(point[1]))
+        h, w = labels_map.shape
+        py = max(0, min(py, h - 1))
+        px = max(0, min(px, w - 1))
+
+        target_label = labels_map[py, px]
+        if target_label == 0:
+            # 点恰好在背景上（mask 边缘），找最近的前景连通域
+            fg_ys, fg_xs = np.where(mask_binary > 0)
+            if len(fg_ys) == 0:
+                return mask
+            dists = (fg_xs - px) ** 2 + (fg_ys - py) ** 2
+            nearest_idx = np.argmin(dists)
+            target_label = labels_map[fg_ys[nearest_idx], fg_xs[nearest_idx]]
+
+        filtered = (labels_map == target_label).astype(mask.dtype)
+        removed_pixels = int(np.sum(mask_binary) - np.sum(filtered))
+        if removed_pixels > 0:
+            print(f"连通域过滤: 移除了 {removed_pixels} 个离散像素 (共 {num_labels - 1} 个连通域)")
+        return filtered
 
     def visualize_points(self, image, points, labels):
         """

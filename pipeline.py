@@ -170,7 +170,10 @@ class MLLMSAMPipeline:
 
             elif action == "concept_generator":
                 # 生成概念，得到生成的每个concept对应的带有mask的分割结果图片
-                result = self.concept_gen.segment_with_concept(tool_params, self.sam, self.state["original_image"])
+                result = self.concept_gen.segment_with_concept(
+                    tool_params, self.sam, self.state["original_image"],
+                    query=self.state["original_text"],
+                )
                 verdict = self._process_segmentation_result(result, "concept_generator")
                 self.state["tool_history"].append({
                     "tool": "concept_generator",

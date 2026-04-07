@@ -212,15 +212,18 @@ class MLLMProcessor:
         parts = [f"Initial user input query: {text_prompt}"]
 
         if tool_history:
-            history_lines = []
+            parts.append("")
+            parts.append("=== IMPORTANT: PREVIOUS FAILED ATTEMPTS ===")
             for entry in tool_history:
-                history_lines.append(
-                    f"Iter{entry['iteration']}: {entry['tool']} -> {entry['verdict']}"
+                parts.append(
+                    f"- Iteration {entry['iteration']}: Called \"{entry['tool']}\" -> Result: {entry['verdict']}"
                 )
             parts.append(
-                "Previous attempts: [" + ", ".join(history_lines) + "]. "
-                "Avoid repeating failed strategies; try a different tool or parameters."
+                "WARNING: You MUST NOT call the same tool with similar parameters "
+                "if it was rejected above. Choose a DIFFERENT tool or significantly "
+                "different parameters."
             )
+            parts.append("===")
 
         parts.append("Below are the original image and the image with grid respectively")
         return "\n".join(parts)
@@ -309,7 +312,7 @@ class MLLMProcessor:
             ).to(self.device)
             
             # 推理：生成输出
-            generated_ids = self.model.generate(**inputs, max_new_tokens=256)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=512)
             
             # 去除输入部分
             generated_ids_trimmed = [
