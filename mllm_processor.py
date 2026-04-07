@@ -375,23 +375,56 @@ class MLLMProcessor:
     
     
     def _parse_response(self, text):
-        """解析模型响应，提取<tool>标签内的JSON"""
+        """解析模型响应，兼容 JSON 体和属性式 <tool> 调用格式。"""
         try:
-            # 使用正则表达式提取<tool>标签中的内容
-            match = re.search(r'<tool>(.*?)</tool>', text, re.DOTALL)
+            match = re.search(r"<tool\b([^>]*)>(.*?)</tool>", text, re.DOTALL)
             if match:
-                json_str = match.group(1).strip()
-                # 移除可能的markdown代码块标记
-                if json_str.startswith("```"):
-                    json_str = json_str.strip("`").strip("json").strip()
-                return json.loads(json_str)
-            
+                attrs = (match.group(1) or "").strip()
+                body = (match.group(2) or "").strip()
+
+                if body:
+                    parsed = self._parse_tool_json_body(body)
+                    if parsed is not None:
+                        return parsed
+
+                if attrs:
+                    parsed = self._parse_tool_attributes(attrs)
+                    if parsed is not None:
+                        return parsed
+
             print("未找到<tool>标签")
             return self._get_default_response()
             
         except Exception as e:
             print(f"解析响应失败: {e}")
             return self._get_default_response()
+
+    def _parse_tool_json_body(self, body):
+        json_str = body.strip()
+        if json_str.startswith("```"):
+            json_str = json_str.strip("`").strip("json").strip()
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            return None
+
+    def _parse_tool_attributes(self, attrs):
+        name_match = re.search(r"""name\s*=\s*(['"])(.*?)\1""", attrs, re.DOTALL)
+        params_match = re.search(r"""parameters\s*=\s*(['"])(.*?)\1""", attrs, re.DOTALL)
+        if not name_match:
+            return None
+
+        name = name_match.group(2).strip()
+        params_text = params_match.group(2).strip() if params_match else "{}"
+        try:
+            parameters = json.loads(params_text) if params_text else {}
+        except json.JSONDecodeError:
+            return None
+
+        return {
+            "name": name,
+            "parameters": parameters,
+        }
 
     def _get_default_response(self):
         """解析失败时的默认响应：用 concept_generator 重试，而非直接终止"""

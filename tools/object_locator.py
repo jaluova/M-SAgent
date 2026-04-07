@@ -131,15 +131,20 @@ class ObjectLocator:
             # 连通域过滤：只保留包含最高置信度点的连通区域
             if result.get("success") and result.get("best_result"):
                 top_point = localization.absolute_points[0]  # 按置信度排序，第一个最高
-                for res in result["results"]:
+                result_items = result.get("results") or [result["best_result"]]
+
+                for res in result_items:
                     res["mask"] = self._keep_component_at_point(
                         res["mask"], top_point,
                     )
+
                 # 重新计算 mask_area 和 best_result
-                for res in result["results"]:
+                for res in result_items:
                     res["mask_area"] = int(np.sum(res["mask"] > 0.5))
+
+                result["results"] = result_items
                 result["best_result"] = max(
-                    result["results"], key=lambda x: x["score"],
+                    result_items, key=lambda x: x["score"],
                 )
 
             # 保存分割结果可视化
@@ -308,11 +313,12 @@ class ObjectLocator:
         Returns:
             numpy array (H, W), 过滤后的 mask
         """
-        mask_binary = (np.squeeze(mask) > 0.5).astype(np.uint8)
+        mask_array = np.asarray(np.squeeze(mask))
+        mask_binary = (mask_array > 0.5).astype(np.uint8)
         num_labels, labels_map = cv2.connectedComponents(mask_binary)
         if num_labels <= 2:
             # 只有背景 + 1 个连通域，无需过滤
-            return mask
+            return mask_binary.astype(mask_array.dtype, copy=False)
 
         px, py = int(round(point[0])), int(round(point[1]))
         h, w = labels_map.shape
@@ -324,12 +330,12 @@ class ObjectLocator:
             # 点恰好在背景上（mask 边缘），找最近的前景连通域
             fg_ys, fg_xs = np.where(mask_binary > 0)
             if len(fg_ys) == 0:
-                return mask
+                return mask_binary.astype(mask_array.dtype, copy=False)
             dists = (fg_xs - px) ** 2 + (fg_ys - py) ** 2
             nearest_idx = np.argmin(dists)
             target_label = labels_map[fg_ys[nearest_idx], fg_xs[nearest_idx]]
 
-        filtered = (labels_map == target_label).astype(mask.dtype)
+        filtered = (labels_map == target_label).astype(mask_array.dtype, copy=False)
         removed_pixels = int(np.sum(mask_binary) - np.sum(filtered))
         if removed_pixels > 0:
             print(f"连通域过滤: 移除了 {removed_pixels} 个离散像素 (共 {num_labels - 1} 个连通域)")
