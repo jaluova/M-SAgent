@@ -178,9 +178,9 @@ class JobManager:
             if not localization.absolute_points:
                 raise TrainAdapterClientError("TrainAdapter returned no usable points", kind="server")
 
-            check_image_name = "localization_overlay.png"
+            check_image_name = "localization_overlay.jpg"
             if localization.annotated_image is not None:
-                localization.annotated_image.save(job.work_dir / check_image_name)
+                self._save_preview_image(localization.annotated_image, job.work_dir / check_image_name)
 
             labels = [1] * len(localization.absolute_points)
             sam = self._get_sam()
@@ -198,10 +198,12 @@ class JobManager:
             mask_png_path = job.work_dir / "mask.png"
             mask_npy_path = job.work_dir / "mask.npy"
             result_image_path = job.work_dir / "result.png"
+            result_preview_path = job.work_dir / "result_preview.jpg"
             self._save_mask_png(mask, mask_png_path)
             np.save(mask_npy_path, mask)
             result_image = sam.apply_mask_to_image(image, mask)
             result_image.save(result_image_path)
+            self._save_preview_image(result_image, result_preview_path)
 
             check_image_url = (
                 f"/api/jobs/{job_id}/images/{check_image_name}"
@@ -236,6 +238,7 @@ class JobManager:
                 "iterations": 1,
                 "maskCount": 1,
                 "resultImageUrl": f"/api/jobs/{job_id}/result",
+                "resultPreviewUrl": f"/api/jobs/{job_id}/images/result_preview.jpg",
                 "maskUrl": f"/api/jobs/{job_id}/mask?format=png",
             }
             self._update_job(job_id, status="complete", result=result_payload)
@@ -281,6 +284,24 @@ class JobManager:
     def _save_mask_png(mask: np.ndarray, output_path: Path):
         binary_mask = (mask > 0.5).astype(np.uint8) * 255
         Image.fromarray(binary_mask, mode="L").save(output_path)
+
+    @staticmethod
+    def _save_preview_image(image: Image.Image, output_path: Path, max_size: int = 1600, quality: int = 82):
+        preview = image.copy()
+        preview.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+        if preview.mode not in {"RGB", "L"}:
+            preview = preview.convert("RGB")
+        elif preview.mode == "L":
+            preview = preview.convert("RGB")
+
+        preview.save(
+            output_path,
+            format="JPEG",
+            quality=quality,
+            optimize=True,
+            progressive=True,
+        )
 
     def resolve_job_file(self, job_id: str, filename: str) -> Path | None:
         job = self.get_job(job_id)

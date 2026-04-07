@@ -14,6 +14,7 @@ class JobResultModel(BaseModel):
     iterations: int
     mask_count: int = Field(alias="maskCount")
     result_image_url: str = Field(alias="resultImageUrl")
+    result_preview_url: str | None = Field(default=None, alias="resultPreviewUrl")
     mask_url: str = Field(alias="maskUrl")
 
     model_config = {"populate_by_name": True}

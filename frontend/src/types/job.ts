@@ -23,6 +23,7 @@ export interface JobResult {
   readonly iterations: number
   readonly maskCount: number
   readonly resultImageUrl: string
+  readonly resultPreviewUrl: string | null
   readonly maskUrl: string
 }
 
@@ -121,6 +122,20 @@ function resolveUrl(url: unknown, fallbackPath: string): string {
   return toApiUrl(candidate.startsWith("/") ? candidate : `/${candidate}`)
 }
 
+function resolveOptionalUrl(url: unknown): string | null {
+  const candidate = asOptionalString(url)
+
+  if (!candidate) {
+    return null
+  }
+
+  if (/^https?:\/\//.test(candidate)) {
+    return candidate
+  }
+
+  return toApiUrl(candidate.startsWith("/") ? candidate : `/${candidate}`)
+}
+
 export function normalizeToolName(value: unknown): ToolName | null {
   if (
     value === 'object_locator' ||
@@ -169,6 +184,9 @@ export function buildJobResult(jobId: string, raw: unknown): JobResult {
     resultImageUrl: resolveUrl(
       record.resultImageUrl ?? record.result_image_url,
       `/api/jobs/${jobId}/result`,
+    ),
+    resultPreviewUrl: resolveOptionalUrl(
+      record.resultPreviewUrl ?? record.result_preview_url,
     ),
     maskUrl: resolveUrl(
       record.maskUrl ?? record.mask_url,

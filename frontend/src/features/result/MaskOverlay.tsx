@@ -13,7 +13,8 @@ export function MaskOverlay(props: MaskOverlayProps) {
   const [mode, setMode] = useState<'mask' | 'result'>('mask')
 
   const overlaySrc = mode === 'mask' ? result.maskUrl : null
-  const baseSrc = mode === 'mask' ? sourceImageUrl ?? result.resultImageUrl : result.resultImageUrl
+  const resultPreviewSrc = result.resultPreviewUrl ?? result.resultImageUrl
+  const baseSrc = mode === 'mask' ? sourceImageUrl ?? resultPreviewSrc : resultPreviewSrc
 
   return (
     <div className="stack">

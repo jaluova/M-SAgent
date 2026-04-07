@@ -6,6 +6,16 @@ import { StatusIndicator } from './features/shared/StatusIndicator'
 import { MainLayout } from './layouts/MainLayout'
 import { useJob } from './hooks/useJob'
 
+function preloadImage(src: string | null) {
+  if (!src) {
+    return
+  }
+
+  const image = new Image()
+  image.decoding = 'async'
+  image.src = src
+}
+
 function App() {
   const {
     jobStatus,
@@ -40,6 +50,15 @@ function App() {
 
     return () => URL.revokeObjectURL(objectUrl)
   }, [selectedFile])
+
+  useEffect(() => {
+    if (!result) {
+      return
+    }
+
+    preloadImage(result.maskUrl)
+    preloadImage(result.resultPreviewUrl ?? result.resultImageUrl)
+  }, [result])
 
   const handleSubmit = async () => {
     if (!selectedFile) {
