@@ -86,8 +86,13 @@ class MLLMProcessor:
             aligned_original_image.save(temp_original_image_path)
             temp_paths.append(temp_original_image_path)
 
-            # 2. 准备用于画网格的底图。网格始终绘制在原图上，已有 mask 作为独立上下文图传入。
-            base_image_for_grid = aligned_original_image.copy()
+            # 2. 准备用于画网格的底图。
+            # 后续迭代优先在已有 mask overlay 上叠加网格，帮助模型把候选 mask 和坐标对应起来。
+            has_mask_overlay = processed_image is not None
+            if has_mask_overlay:
+                base_image_for_grid = smart_resize_for_mllm(ensure_rgb(processed_image))
+            else:
+                base_image_for_grid = aligned_original_image.copy()
                 
             # 3. 绘制高清网格
             # 计算适合当前分辨率的动态Padding，并确保是对其的
@@ -127,7 +132,6 @@ class MLLMProcessor:
 
             # 构建消息 - system prompt 放在 system role
             system_prompt_text = self._read_system_prompt()
-            has_mask_overlay = processed_image is not None
             user_prompt_text = self._build_user_prompt(
                 text_prompt,
                 tool_history,
@@ -271,13 +275,24 @@ class MLLMProcessor:
         parts.append("")
         if has_mask_overlay:
             parts.append(
-                "Below are the original image, the image with grid, and the current accepted-mask overlay image respectively."
+                "You will receive three images in order:"
             )
             parts.append(
-                "The accepted-mask overlay image is context from previous iterations. Inspect it critically instead of assuming it is correct."
+                "1. the original image;"
+            )
+            parts.append(
+                "2. the current context image with a grid overlaid on it (this grid image may already include previous mask overlays);"
+            )
+            parts.append(
+                "3. the current accepted-mask overlay image without the grid."
+            )
+            parts.append(
+                "Treat the accepted-mask overlay as context from previous iterations, not proof that those masks are correct."
             )
         else:
-            parts.append("Below are the original image and the image with grid respectively")
+            parts.append("You will receive two images in order:")
+            parts.append("1. the original image;")
+            parts.append("2. the original image with the grid overlaid.")
         return "\n".join(parts)
 
     def get_prompt_text(self, text_prompt):
@@ -296,8 +311,11 @@ class MLLMProcessor:
         system_prompt = self._read_check_system_prompt()
         user_prompt = (
             f"Initial user input query: {text_prompt}\n"
-            "Below are the original image, the whole-image mask overlay, "
-            "and the zoomed-in review image respectively:"
+            "You will receive three images in order:\n"
+            "1. the original image;\n"
+            "2. the whole-image mask overlay;\n"
+            "3. the zoomed-in review image, which contains two side-by-side panels: "
+            "a tight mask-focused crop and a larger context crop around the same candidate."
         )
         return system_prompt + "\n\n" + user_prompt
         
@@ -322,8 +340,11 @@ class MLLMProcessor:
             check_system_prompt = self._read_check_system_prompt()
             check_user_prompt = (
                 f"Initial user input query: {text_prompt}\n"
-                "Below are the original image, the whole-image mask overlay, "
-                "and the zoomed-in review image respectively:"
+                "You will receive three images in order:\n"
+                "1. the original image;\n"
+                "2. the whole-image mask overlay;\n"
+                "3. the zoomed-in review image, which contains two side-by-side panels: "
+                "a tight mask-focused crop and a larger context crop around the same candidate."
             )
 
             messages = [
