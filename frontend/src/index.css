@@ -71,11 +71,7 @@ img {
 }
 
 .topbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 20px 24px;
+  padding: 18px 24px;
   margin-bottom: 24px;
   border: 1px solid var(--border);
   border-radius: 28px;
@@ -90,47 +86,9 @@ img {
 
 .topbar__title h1 {
   margin: 0;
-  font-size: clamp(2rem, 3vw, 3.4rem);
-  line-height: 1.05;
+  font-size: clamp(1.8rem, 3vw, 3rem);
+  line-height: 1.08;
   letter-spacing: -0.04em;
-}
-
-.topbar__title p {
-  margin: 12px 0 0;
-  color: var(--text-soft);
-  font-size: 1rem;
-}
-
-.topbar__meta {
-  min-width: 280px;
-  display: grid;
-  gap: 12px;
-}
-
-.health-card {
-  padding: 16px 18px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  background: rgba(248, 250, 252, 0.92);
-}
-
-.health-card__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.health-card__grid span {
-  display: block;
-  font-size: 0.78rem;
-  color: var(--text-soft);
-}
-
-.health-card__grid strong {
-  display: block;
-  margin-top: 2px;
-  font-size: 1rem;
 }
 
 .app-grid {
@@ -465,7 +423,7 @@ img {
 .stat-card strong {
   display: block;
   margin-top: 4px;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
 }
 
 .iteration-list {
@@ -521,7 +479,7 @@ img {
   grid-template-columns: auto 1fr;
   gap: 14px;
   align-items: start;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 16px;
   background: rgba(248, 250, 252, 0.92);
   border: 1px solid rgba(226, 232, 240, 0.9);
@@ -631,14 +589,6 @@ img {
 }
 
 @media (max-width: 1100px) {
-  .topbar {
-    flex-direction: column;
-  }
-
-  .topbar__meta {
-    width: 100%;
-  }
-
   .app-grid,
   .result-grid {
     grid-template-columns: 1fr;
@@ -658,10 +608,6 @@ img {
   }
 
   .progress-summary {
-    grid-template-columns: 1fr;
-  }
-
-  .health-card__grid {
     grid-template-columns: 1fr;
   }
 

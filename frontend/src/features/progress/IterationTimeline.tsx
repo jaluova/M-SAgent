@@ -10,7 +10,7 @@ export function IterationTimeline(props: IterationTimelineProps) {
   const { iterations } = props
 
   if (iterations.length === 0) {
-    return <p className="muted">任务开始后，这里会列出每一轮迭代的快照。</p>
+    return <p className="muted">暂无进度</p>
   }
 
   return (
@@ -28,7 +28,6 @@ export function IterationTimeline(props: IterationTimelineProps) {
             <div className="iteration-card__header">
               <div>
                 <p className="eyebrow">Iteration {item.iteration}</p>
-                <h3 className="section-title">工具与评估快照</h3>
               </div>
               <span className={`verdict-pill ${verdictTone}`}>
                 {item.verdict === 'pending' ? '等待评估' : item.verdict}
@@ -37,7 +36,7 @@ export function IterationTimeline(props: IterationTimelineProps) {
 
             <div className="iteration-card__meta">
               <ToolBadge tool={item.tool} />
-              <ScoreBadge score={item.score} />
+              <ScoreBadge score={item.score} hidden={item.tool === 'image_enhancer'} />
             </div>
 
             {item.checkImageUrl ? (

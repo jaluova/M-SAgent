@@ -31,35 +31,33 @@ export function ProgressPanel(props: ProgressPanelProps) {
     <section className="panel">
       <div className="panel__header">
         <div>
-          <p className="eyebrow">实时进度</p>
-          <h2>Agent Loop 追踪</h2>
+          <p className="eyebrow">进度</p>
+          <h2>运行中</h2>
         </div>
         <ToolBadge tool={currentTool} />
       </div>
 
       <div className="progress-summary">
         <div className="summary-card">
-          <span>任务状态</span>
+          <span>状态</span>
           <strong>{jobStatus}</strong>
         </div>
         <div className="summary-card">
-          <span>当前轮次</span>
+          <span>轮次</span>
           <strong>{currentIteration > 0 ? currentIteration : '--'}</strong>
         </div>
         <div className="summary-card">
-          <span>队列位置</span>
+          <span>排队</span>
           <strong>{queuePosition ?? '--'}</strong>
         </div>
       </div>
 
       <div className="stack">
         <div>
-          <p className="eyebrow">Iterations</p>
           <IterationTimeline iterations={iterations} />
         </div>
 
         <div>
-          <p className="eyebrow">Event Stream</p>
           <AgentLogStream events={events} />
         </div>
       </div>

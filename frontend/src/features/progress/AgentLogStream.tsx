@@ -3,19 +3,21 @@ import { type ProgressEvent } from '../../types/job'
 function describeEvent(event: ProgressEvent): string {
   switch (event.type) {
     case 'queued':
-      return `任务已进入队列，当前位置 ${event.position}。`
+      return `进入队列 ${event.position}`
     case 'started':
-      return '任务开始执行，等待第一个 iteration。'
+      return '开始执行'
     case 'iteration_start':
-      return `开始第 ${event.iteration} / ${event.maxIterations} 轮推理。`
+      return `第 ${event.iteration} / ${event.maxIterations} 轮`
     case 'tool_selected':
-      return `第 ${event.iteration} 轮选择工具 ${event.tool}。`
+      return `${event.iteration} 轮使用 ${event.tool}`
     case 'segmentation_result':
-      return `第 ${event.iteration} 轮完成分割，得分 ${event.score.toFixed(3)}。`
+      return event.tool === 'image_enhancer'
+        ? `${event.iteration} 轮完成分割`
+        : `${event.iteration} 轮得分 ${event.score.toFixed(3)}`
     case 'evaluation':
-      return `第 ${event.iteration} 轮评估结论为 ${event.verdict}。`
+      return `${event.iteration} 轮 ${event.verdict}`
     case 'complete':
-      return `任务完成，最佳得分 ${event.result.bestScore.toFixed(3)}。`
+      return `完成 ${event.result.bestScore.toFixed(3)}`
     case 'error':
       return event.message
     default:
@@ -31,7 +33,7 @@ export function AgentLogStream(props: AgentLogStreamProps) {
   const { events } = props
 
   if (events.length === 0) {
-    return <p className="muted">当前还没有日志事件。</p>
+    return <p className="muted">暂无日志</p>
   }
 
   return (

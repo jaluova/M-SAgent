@@ -15,8 +15,8 @@ export function ResultPanel(props: ResultPanelProps) {
     <section className="panel">
       <div className="panel__header">
         <div>
-          <p className="eyebrow">最终结果</p>
-          <h2>可视化与下载</h2>
+          <p className="eyebrow">结果</p>
+          <h2>输出</h2>
         </div>
       </div>
 

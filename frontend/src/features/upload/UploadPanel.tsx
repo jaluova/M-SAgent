@@ -55,8 +55,8 @@ export function UploadPanel(props: UploadPanelProps) {
     <section className="panel">
       <div className="panel__header">
         <div>
-          <p className="eyebrow">输入区</p>
-          <h2>上传图片并发起任务</h2>
+          <p className="eyebrow">输入</p>
+          <h2>新任务</h2>
         </div>
         <StatusIndicator status={jobStatus} />
       </div>
@@ -77,10 +77,7 @@ export function UploadPanel(props: UploadPanelProps) {
         <div className="upload-dropzone__cta">
           <div className="upload-dropzone__icon">IMG</div>
           <div>
-            <strong>选择待分割图片</strong>
-            <p className="muted">
-              拖拽图片到这里，或点击按钮选择本地文件。推荐使用 example 目录中的样例图快速验证流程。
-            </p>
+            <strong>选择图片</strong>
           </div>
         </div>
 
@@ -114,9 +111,6 @@ export function UploadPanel(props: UploadPanelProps) {
           value={textQuery}
           onChange={(event) => onTextChange(event.target.value)}
         />
-        <p className="helper-text">
-          尽量描述颜色、位置、数量或属性，能帮助 MLLM 更快收敛。
-        </p>
       </div>
 
       <div className="field-group">
@@ -139,8 +133,8 @@ export function UploadPanel(props: UploadPanelProps) {
       {queuePosition ? (
         <div className="note-list">
           <div className="note">
-            <strong>当前排队位置</strong>
-            <span className="muted">队列第 {queuePosition} 位，前端会自动监听状态变化。</span>
+            <strong>排队中</strong>
+            <span className="muted">第 {queuePosition} 位</span>
           </div>
         </div>
       ) : null}
@@ -156,9 +150,6 @@ export function UploadPanel(props: UploadPanelProps) {
         >
           {jobStatus === 'uploading' ? '上传中...' : '开始分割'}
         </button>
-        <span className="helper-text">
-          任务提交后会自动建立 WebSocket 连接，实时刷新每一轮推理结果。
-        </span>
       </div>
     </section>
   )

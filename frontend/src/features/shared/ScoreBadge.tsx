@@ -1,12 +1,13 @@
 interface ScoreBadgeProps {
   readonly score: number | null
+  readonly hidden?: boolean
 }
 
 export function ScoreBadge(props: ScoreBadgeProps) {
-  const { score } = props
+  const { score, hidden = false } = props
 
-  if (score === null) {
-    return <span className="score-badge">等待评分</span>
+  if (hidden || score === null) {
+    return null
   }
 
   const tone =
