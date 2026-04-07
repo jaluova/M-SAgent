@@ -114,6 +114,14 @@ The FastAPI app is defined in [server/app.py](server/app.py). Start it with:
 python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
+On a single A100 deployment, prefer the wrapper script instead:
+
+```bash
+./scripts/start_web_single_gpu_stable.sh
+```
+
+This script forces the web service onto the embedded GridGround path, disables the external TrainAdapter fallback, and refuses to start if it detects another GPU-backed TrainAdapter service on `127.0.0.1:8765`.
+
 Useful checks:
 
 ```bash
@@ -153,7 +161,7 @@ If you want the full web app locally, run the backend and frontend in two termin
 Terminal 1:
 
 ```bash
-python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+./scripts/start_web_single_gpu_stable.sh
 ```
 
 Terminal 2:
@@ -179,7 +187,7 @@ npm install
 npm run build
 
 cd ..
-python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+./scripts/start_web_single_gpu_stable.sh
 ```
 
 After the build, the backend serves `frontend/dist` at `/`.
@@ -196,6 +204,29 @@ After the build, the backend serves `frontend/dist` at `/`.
 
 - Still available for compatibility.
 - Useful if you want to keep an external localization service.
+- Do not run it on GPU next to the main web backend in the `single_gpu_stable` profile, or you will load a second `Qwen2.5-VL` and likely OOM.
+
+## Avoid Double Qwen on Web Deployments
+
+If the CLI command below works:
+
+```bash
+python main.py \
+  --image sam3/assets/images/truck.jpg \
+  --text "truck"
+```
+
+but the web service OOMs, the most common cause is that an extra TrainAdapter service was started with `--device cuda`. In that situation:
+
+1. The web backend loads one `Qwen2.5-VL`.
+2. TrainAdapter loads another `Qwen2.5-VL`.
+3. Both compete for the same GPU memory.
+
+Use embedded GridGround for the web backend and avoid starting a separate GPU TrainAdapter process. The safe startup path is:
+
+```bash
+./scripts/start_web_single_gpu_stable.sh
+```
 
 ## Tests
 

@@ -61,22 +61,45 @@ class JobManager:
         self._worker_task = None
 
     def get_health(self) -> dict[str, Any]:
-        service_status = self._train_adapter_client.describe_service()
+        backend = (Config.GRIDGROUND_BACKEND or "embedded").lower()
         detail = None
+        localization_ok = True
+        localization_device = None
 
-        if service_status.get("ok"):
-            detail = (
-                f"TrainAdapter ready: device={service_status.get('device', 'unknown')}, "
-                f"adapter={service_status.get('adapter_type', 'unknown')}"
-            )
+        if backend == "embedded":
+            if self._pipeline is None:
+                detail = "Embedded GridGround configured; localization runtime will load with the first job"
+            else:
+                status = self._pipeline.locator.check_service_health()
+                localization_ok = bool(status.get("ok"))
+                localization_device = status.get("device")
+                if localization_ok:
+                    detail = (
+                        f"Embedded GridGround ready: device={status.get('device', 'unknown')}, "
+                        f"latency={status.get('elapsed_ms', 'n/a')} ms"
+                    )
+                else:
+                    detail = status.get("error", "Embedded GridGround unavailable")
         else:
-            detail = service_status.get("error", "TrainAdapter unavailable")
+            service_status = self._train_adapter_client.describe_service()
+            localization_ok = bool(service_status.get("ok"))
+            localization_device = service_status.get("device")
+            if localization_ok:
+                detail = (
+                    f"TrainAdapter ready: device={service_status.get('device', 'unknown')}, "
+                    f"adapter={service_status.get('adapter_type', 'unknown')}"
+                )
+            else:
+                detail = service_status.get("error", "TrainAdapter unavailable")
 
         return {
-            "ok": bool(service_status.get("ok")),
-            "gpu": str(service_status.get("device") or Config.DEVICE),
+            "ok": localization_ok,
+            "gpu": str(localization_device or Config.DEVICE),
             "queueSize": self._queue.qsize(),
             "modelLoaded": self._sam.is_available() if self._sam is not None else False,
+            "localizationBackend": backend,
+            "trainAdapterEnabled": bool(Config.TRAIN_ADAPTER_ENABLED),
+            "deploymentProfile": Config.DEPLOYMENT_PROFILE,
             "detail": detail,
         }
 

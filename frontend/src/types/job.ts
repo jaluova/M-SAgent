@@ -87,6 +87,9 @@ export interface HealthStatus {
   readonly gpu: string | null
   readonly queueSize: number | null
   readonly modelLoaded: boolean | null
+  readonly localizationBackend: string | null
+  readonly trainAdapterEnabled: boolean | null
+  readonly deploymentProfile: string | null
   readonly detail: string | null
 }
 
@@ -322,6 +325,19 @@ export function normalizeHealthStatus(raw: unknown): HealthStatus {
       typeof (record.modelLoaded ?? record.model_loaded) === 'boolean'
         ? Boolean(record.modelLoaded ?? record.model_loaded)
         : null,
+    localizationBackend: asOptionalString(
+      record.localizationBackend ?? record.localization_backend,
+    ),
+    trainAdapterEnabled:
+      typeof (record.trainAdapterEnabled ?? record.train_adapter_enabled) ===
+      'boolean'
+        ? Boolean(
+            record.trainAdapterEnabled ?? record.train_adapter_enabled,
+          )
+        : null,
+    deploymentProfile: asOptionalString(
+      record.deploymentProfile ?? record.deployment_profile,
+    ),
     detail: asOptionalString(record.detail ?? record.message),
   }
 }

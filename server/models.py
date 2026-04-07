@@ -46,6 +46,9 @@ class HealthResponseModel(BaseModel):
     gpu: str | None = None
     queue_size: int | None = Field(default=None, alias="queueSize")
     model_loaded: bool | None = Field(default=None, alias="modelLoaded")
+    localization_backend: str | None = Field(default=None, alias="localizationBackend")
+    train_adapter_enabled: bool | None = Field(default=None, alias="trainAdapterEnabled")
+    deployment_profile: str | None = Field(default=None, alias="deploymentProfile")
     detail: str | None = None
 
     model_config = {"populate_by_name": True}
