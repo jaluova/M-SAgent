@@ -26,7 +26,7 @@ export function ImagePreview(props: ImagePreviewProps) {
   return (
     <div className="image-preview">
       <div className="image-preview__frame">
-        <img src={previewUrl} alt={file.name} />
+        <img src={previewUrl} alt={file.name} loading="eager" />
       </div>
       <div className="image-preview__meta">
         <div>

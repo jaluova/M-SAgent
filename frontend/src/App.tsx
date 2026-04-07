@@ -5,6 +5,8 @@ import { ResultPanel } from './features/result/ResultPanel'
 import { MainLayout } from './layouts/MainLayout'
 import { useJob } from './hooks/useJob'
 
+const PREVIEW_MAX_DIMENSION = 1600
+
 function preloadImage(src: string | null) {
   if (!src) {
     return
@@ -13,6 +15,67 @@ function preloadImage(src: string | null) {
   const image = new Image()
   image.decoding = 'async'
   image.src = src
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error(`Failed to load image: ${src}`))
+    image.src = src
+  })
+}
+
+async function createPreviewUrl(file: File): Promise<string> {
+  const originalObjectUrl = URL.createObjectURL(file)
+
+  try {
+    const image = await loadImageElement(originalObjectUrl)
+    const { naturalWidth, naturalHeight } = image
+
+    if (!naturalWidth || !naturalHeight) {
+      return originalObjectUrl
+    }
+
+    const scale = Math.min(
+      1,
+      PREVIEW_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight),
+    )
+
+    if (scale >= 0.999) {
+      return originalObjectUrl
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(naturalHeight * scale))
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return originalObjectUrl
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    const previewBlob = await new Promise<Blob | null>((resolve) => {
+      const preferredType =
+        file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+      const quality = preferredType === 'image/png' ? undefined : 0.9
+      canvas.toBlob(resolve, preferredType, quality)
+    })
+
+    if (!previewBlob) {
+      return originalObjectUrl
+    }
+
+    const previewUrl = URL.createObjectURL(previewBlob)
+    URL.revokeObjectURL(originalObjectUrl)
+    return previewUrl
+  } catch {
+    URL.revokeObjectURL(originalObjectUrl)
+    return URL.createObjectURL(file)
+  }
 }
 
 function App() {
@@ -42,10 +105,25 @@ function App() {
       return
     }
 
-    const objectUrl = URL.createObjectURL(selectedFile)
-    setPreviewUrl(objectUrl)
+    let revoked = false
+    let currentUrl: string | null = null
 
-    return () => URL.revokeObjectURL(objectUrl)
+    void createPreviewUrl(selectedFile).then((nextUrl) => {
+      if (revoked) {
+        URL.revokeObjectURL(nextUrl)
+        return
+      }
+
+      currentUrl = nextUrl
+      setPreviewUrl(nextUrl)
+    })
+
+    return () => {
+      revoked = true
+      if (currentUrl) {
+        URL.revokeObjectURL(currentUrl)
+      }
+    }
   }, [selectedFile])
 
   useEffect(() => {
