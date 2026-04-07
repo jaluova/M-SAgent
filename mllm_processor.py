@@ -2,6 +2,7 @@ import torch
 import json
 import re
 import base64
+import html
 from io import BytesIO
 import re
 import json
@@ -400,7 +401,7 @@ class MLLMProcessor:
             return self._get_default_response()
 
     def _parse_tool_json_body(self, body):
-        json_str = body.strip()
+        json_str = html.unescape(body.strip())
         if json_str.startswith("```"):
             json_str = json_str.strip("`").strip("json").strip()
         try:
@@ -414,8 +415,8 @@ class MLLMProcessor:
         if not name_match:
             return None
 
-        name = name_match.group(2).strip()
-        params_text = params_match.group(2).strip() if params_match else "{}"
+        name = html.unescape(name_match.group(2).strip())
+        params_text = html.unescape(params_match.group(2).strip()) if params_match else "{}"
         try:
             parameters = json.loads(params_text) if params_text else {}
         except json.JSONDecodeError:

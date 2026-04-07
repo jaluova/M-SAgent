@@ -60,3 +60,13 @@ class EvaluationContractTests(unittest.TestCase):
 
         self.assertEqual(parsed["name"], "object_locator")
         self.assertEqual(parsed["parameters"]["labels"], [1, 1])
+
+    def test_parse_response_accepts_html_escaped_attribute_parameters(self):
+        processor = MLLMProcessor.__new__(MLLMProcessor)
+
+        parsed = processor._parse_response(
+            '<tool name="image_enhancer" parameters="{&quot;rectangular area&quot;: [[2, 2], [4, 4]]}"></tool>'
+        )
+
+        self.assertEqual(parsed["name"], "image_enhancer")
+        self.assertEqual(parsed["parameters"]["rectangular area"], [[2, 2], [4, 4]])
