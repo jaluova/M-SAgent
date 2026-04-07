@@ -15,6 +15,12 @@ class ServerConfig:
             Config.BASE_DIR / "remote_artifacts" / "server_jobs",
         )
     ).expanduser()
+    FRONTEND_DIST_DIR = Path(
+        os.environ.get(
+            "M_SAGENT_FRONTEND_DIST_DIR",
+            Config.BASE_DIR / "frontend" / "dist",
+        )
+    ).expanduser()
     CORS_ORIGINS = [
         origin.strip()
         for origin in os.environ.get(

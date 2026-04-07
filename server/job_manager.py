@@ -37,7 +37,8 @@ class JobManager:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
         self._state_lock = threading.Lock()
-        self._sam = SAMProcessor()
+        self._resource_lock = threading.Lock()
+        self._sam: SAMProcessor | None = None
         self._train_adapter_client = TrainAdapterClient()
 
     async def start(self):
@@ -71,7 +72,7 @@ class JobManager:
             "ok": bool(service_status.get("ok")),
             "gpu": str(service_status.get("device") or Config.DEVICE),
             "queueSize": self._queue.qsize(),
-            "modelLoaded": self._sam.is_available(),
+            "modelLoaded": self._sam.is_available() if self._sam is not None else False,
             "detail": detail,
         }
 
@@ -182,7 +183,8 @@ class JobManager:
                 localization.annotated_image.save(job.work_dir / check_image_name)
 
             labels = [1] * len(localization.absolute_points)
-            segmentation = self._sam.segment_with_points(
+            sam = self._get_sam()
+            segmentation = sam.segment_with_points(
                 image,
                 points=localization.absolute_points,
                 labels=labels,
@@ -198,7 +200,7 @@ class JobManager:
             result_image_path = job.work_dir / "result.png"
             self._save_mask_png(mask, mask_png_path)
             np.save(mask_npy_path, mask)
-            result_image = self._sam.apply_mask_to_image(image, mask)
+            result_image = sam.apply_mask_to_image(image, mask)
             result_image.save(result_image_path)
 
             check_image_url = (
@@ -248,6 +250,12 @@ class JobManager:
             if record is None:
                 return
             record.events.append(event)
+
+    def _get_sam(self) -> SAMProcessor:
+        with self._resource_lock:
+            if self._sam is None:
+                self._sam = SAMProcessor()
+            return self._sam
 
     def _update_job(self, job_id: str, **updates: Any):
         with self._state_lock:
