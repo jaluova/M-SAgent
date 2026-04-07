@@ -9,9 +9,10 @@ import numpy as np
 from PIL import Image
 
 from config import Config
+from pipeline import MLLMSAMPipeline
 from sam_processor import SAMProcessor
 from server.config import ServerConfig
-from tools.train_adapter_client import TrainAdapterClient, TrainAdapterClientError
+from tools.train_adapter_client import TrainAdapterClient
 
 
 @dataclass
@@ -31,6 +32,8 @@ class JobRecord:
 
 
 class JobManager:
+    SUPPORTED_EVENT_TOOLS = {"object_locator", "concept_generator", "image_enhancer", "report_no_mask"}
+
     def __init__(self):
         ServerConfig.setup_dirs()
         self._jobs: dict[str, JobRecord] = {}
@@ -39,6 +42,7 @@ class JobManager:
         self._state_lock = threading.Lock()
         self._resource_lock = threading.Lock()
         self._sam: SAMProcessor | None = None
+        self._pipeline: MLLMSAMPipeline | None = None
         self._train_adapter_client = TrainAdapterClient()
 
     async def start(self):
@@ -151,96 +155,29 @@ class JobManager:
             return
 
         try:
-            self._update_job(job_id, status="running", position=None)
+            self._update_job(job_id, status="running", position=None, error=None, current_tool=None)
             self._append_event(job_id, {"type": "started"})
-            self._update_job(job_id, current_iteration=1)
-            self._append_event(
-                job_id,
-                {
-                    "type": "iteration_start",
-                    "iteration": 1,
-                    "maxIterations": job.max_iterations,
-                },
-            )
-            self._update_job(job_id, current_tool="object_locator")
-            self._append_event(
-                job_id,
-                {
-                    "type": "tool_selected",
-                    "iteration": 1,
-                    "tool": "object_locator",
-                    "params": {"query": job.text},
-                },
-            )
+            pipeline = self._get_pipeline()
+            pipeline.set_event_callback(lambda event: self._handle_pipeline_event(job_id, event))
 
-            image = Image.open(job.image_path).convert("RGB")
-            localization, _ = self._train_adapter_client.localize_with_metadata(image, job.text)
-            if not localization.absolute_points:
-                raise TrainAdapterClientError("TrainAdapter returned no usable points", kind="server")
+            original_output_dir = Config.OUTPUT_DIR
+            original_tool_calls_log = Config.TOOL_CALLS_LOG
+            try:
+                Config.OUTPUT_DIR = job.work_dir
+                Config.TOOL_CALLS_LOG = job.work_dir / "tool_calls"
+                Config.setup_dirs()
 
-            check_image_name = "localization_overlay.jpg"
-            if localization.annotated_image is not None:
-                self._save_preview_image(localization.annotated_image, job.work_dir / check_image_name)
+                pipeline_result = pipeline.run(
+                    str(job.image_path),
+                    job.text,
+                    max_iterations=job.max_iterations,
+                )
+            finally:
+                pipeline.set_event_callback(None)
+                Config.OUTPUT_DIR = original_output_dir
+                Config.TOOL_CALLS_LOG = original_tool_calls_log
 
-            labels = [1] * len(localization.absolute_points)
-            sam = self._get_sam()
-            segmentation = sam.segment_with_points(
-                image,
-                points=localization.absolute_points,
-                labels=labels,
-                multimask_output=True,
-            )
-            best_result = segmentation.get("best_result")
-            if not segmentation.get("success") or best_result is None:
-                raise RuntimeError(segmentation.get("message", "SAM segmentation failed"))
-
-            mask = np.asarray(best_result["mask"], dtype=np.float32)
-            mask_png_path = job.work_dir / "mask.png"
-            mask_npy_path = job.work_dir / "mask.npy"
-            result_image_path = job.work_dir / "result.png"
-            result_preview_path = job.work_dir / "result_preview.jpg"
-            self._save_mask_png(mask, mask_png_path)
-            np.save(mask_npy_path, mask)
-            result_image = sam.apply_mask_to_image(image, mask)
-            result_image.save(result_image_path)
-            self._save_preview_image(result_image, result_preview_path)
-
-            check_image_url = (
-                f"/api/jobs/{job_id}/images/{check_image_name}"
-                if (job.work_dir / check_image_name).exists()
-                else f"/api/jobs/{job_id}/result"
-            )
-            score = float(best_result.get("score", 0.0))
-            self._append_event(
-                job_id,
-                {
-                    "type": "segmentation_result",
-                    "iteration": 1,
-                    "tool": "object_locator",
-                    "score": score,
-                    "checkImageUrl": check_image_url,
-                },
-            )
-            self._append_event(
-                job_id,
-                {
-                    "type": "evaluation",
-                    "iteration": 1,
-                    "verdict": "Accept",
-                    "rejectedIndices": [],
-                },
-            )
-
-            result_payload = {
-                "jobId": job_id,
-                "success": True,
-                "bestScore": score,
-                "iterations": 1,
-                "maskCount": 1,
-                "resultImageUrl": f"/api/jobs/{job_id}/result",
-                "resultPreviewUrl": f"/api/jobs/{job_id}/images/result_preview.jpg",
-                "maskUrl": f"/api/jobs/{job_id}/mask?format=png",
-            }
+            result_payload = self._materialize_pipeline_result(job, pipeline_result)
             self._update_job(job_id, status="complete", result=result_payload)
             self._append_event(job_id, {"type": "complete", "result": result_payload})
         except Exception as exc:
@@ -259,6 +196,13 @@ class JobManager:
             if self._sam is None:
                 self._sam = SAMProcessor()
             return self._sam
+
+    def _get_pipeline(self) -> MLLMSAMPipeline:
+        with self._resource_lock:
+            if self._pipeline is None:
+                self._pipeline = MLLMSAMPipeline()
+                self._sam = self._pipeline.sam
+            return self._pipeline
 
     def _update_job(self, job_id: str, **updates: Any):
         with self._state_lock:
@@ -290,7 +234,11 @@ class JobManager:
         preview = image.copy()
         preview.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-        if preview.mode not in {"RGB", "L"}:
+        if "A" in preview.getbands():
+            background = Image.new("RGB", preview.size, (255, 255, 255))
+            background.paste(preview, mask=preview.getchannel("A"))
+            preview = background
+        elif preview.mode not in {"RGB", "L"}:
             preview = preview.convert("RGB")
         elif preview.mode == "L":
             preview = preview.convert("RGB")
@@ -315,3 +263,78 @@ class JobManager:
             return None
 
         return candidate if candidate.exists() else None
+
+    def _handle_pipeline_event(self, job_id: str, event: dict[str, Any]):
+        event_payload = dict(event)
+        event_type = str(event_payload.get("type") or "")
+        iteration = int(event_payload.get("iteration") or 0)
+        tool = event_payload.get("tool")
+
+        if event_type == "iteration_start":
+            self._update_job(job_id, current_iteration=iteration)
+        elif event_type == "tool_selected":
+            current_tool = tool if tool in self.SUPPORTED_EVENT_TOOLS else None
+            self._update_job(job_id, current_iteration=iteration, current_tool=current_tool)
+        elif event_type == "segmentation_result":
+            check_image_path = event_payload.pop("check_image_path", None)
+            if check_image_path:
+                event_payload["checkImageUrl"] = f"/api/jobs/{job_id}/images/{Path(check_image_path).name}"
+            current_tool = tool if tool in self.SUPPORTED_EVENT_TOOLS else None
+            self._update_job(job_id, current_iteration=iteration, current_tool=current_tool)
+        elif event_type == "evaluation":
+            rejected = event_payload.get("rejectedIndices")
+            if not isinstance(rejected, list):
+                event_payload["rejectedIndices"] = []
+
+        self._append_event(job_id, event_payload)
+
+    def _materialize_pipeline_result(self, job: JobRecord, pipeline_result: dict[str, Any]) -> dict[str, Any]:
+        if not pipeline_result.get("success"):
+            raise RuntimeError(pipeline_result.get("message", "Pipeline did not produce an accepted mask"))
+
+        accepted_masks = pipeline_result.get("accepted_masks") or []
+        mask_arrays = [
+            np.asarray(item.get("mask"), dtype=np.float32)
+            for item in accepted_masks
+            if isinstance(item, dict) and item.get("mask") is not None
+        ]
+        if not mask_arrays:
+            raise RuntimeError("Pipeline returned success without any accepted masks")
+
+        result_image_source = Path(str(pipeline_result.get("final_image_path", ""))).expanduser()
+        if not result_image_source.exists():
+            raise RuntimeError(f"Final image not found: {result_image_source}")
+
+        result_image = Image.open(result_image_source).convert("RGBA")
+        result_image_path = job.work_dir / "result.png"
+        result_preview_path = job.work_dir / "result_preview.jpg"
+        result_image.save(result_image_path)
+        self._save_preview_image(result_image, result_preview_path)
+
+        mask_stack = np.stack(mask_arrays) if len(mask_arrays) > 1 else mask_arrays[0]
+        union_mask = np.maximum.reduce([(mask > 0.5).astype(np.float32) for mask in mask_arrays])
+        mask_png_path = job.work_dir / "mask.png"
+        mask_npy_path = job.work_dir / "mask.npy"
+        self._save_mask_png(union_mask, mask_png_path)
+        np.save(mask_npy_path, mask_stack)
+
+        best_score = float(pipeline_result.get("best_score", 0.0))
+        iterations = int(pipeline_result.get("iterations", job.max_iterations))
+        result_payload = {
+            "jobId": job.job_id,
+            "success": True,
+            "bestScore": best_score,
+            "iterations": iterations,
+            "maskCount": len(mask_arrays),
+            "resultImageUrl": f"/api/jobs/{job.job_id}/result",
+            "resultPreviewUrl": f"/api/jobs/{job.job_id}/images/result_preview.jpg",
+            "maskUrl": f"/api/jobs/{job.job_id}/mask?format=png",
+        }
+
+        for artifact in job.work_dir.glob("final_result_*"):
+            if artifact.resolve() != result_image_path.resolve():
+                artifact.unlink(missing_ok=True)
+        for artifact in job.work_dir.glob("final_mask_*"):
+            artifact.unlink(missing_ok=True)
+
+        return result_payload

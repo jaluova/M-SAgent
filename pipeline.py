@@ -27,9 +27,10 @@ class MLLMSAMPipeline:
         (128, 0, 0),    # Maroon
     ]
 
-    def __init__(self):
+    def __init__(self, event_callback=None):
         Config.setup_dirs()
         self._log_runtime_profile()
+        self._event_callback = event_callback
 
         # 初始化组件
         print("初始化组件...")
@@ -40,6 +41,11 @@ class MLLMSAMPipeline:
         self.concept_gen = ConceptGenerator(self.mllm)
         self.enhancer = ImageEnhancer()
         
+        self._reset_state()
+        
+        print("初始化完成")
+
+    def _reset_state(self):
         # 状态跟踪
         self.state = {
             "original_image": None, #原始输入图像
@@ -53,8 +59,17 @@ class MLLMSAMPipeline:
             "accepted_masks": [], # List of {'mask': ..., 'score': ..., 'method': ...}
             "tool_history": [],   # List of {'tool': ..., 'verdict': ..., 'iteration': ...}
         }
-        
-        print("初始化完成")
+
+    def set_event_callback(self, callback):
+        self._event_callback = callback
+
+    def _emit_event(self, event):
+        if self._event_callback is None:
+            return
+        try:
+            self._event_callback(event)
+        except Exception as exc:
+            print(f"事件回调失败: {exc}")
 
     def _log_runtime_profile(self):
         print("运行配置摘要:")
@@ -152,6 +167,8 @@ class MLLMSAMPipeline:
         """
         if max_iterations is None:
             max_iterations = Config.MAX_TOOL_CALLS
+
+        self._reset_state()
         
         print(f"\n开始处理流程")
         print(f"图像: {image_path}")
@@ -166,6 +183,13 @@ class MLLMSAMPipeline:
         while self.state["iteration"] < max_iterations:
             self.state["iteration"] += 1
             print(f"\n--- 迭代 {self.state['iteration']}/{max_iterations} ---")
+            self._emit_event(
+                {
+                    "type": "iteration_start",
+                    "iteration": self.state["iteration"],
+                    "maxIterations": max_iterations,
+                }
+            )
             
             # 2.1 MLLM分析决策
             print("MLLM分析中...")
@@ -184,6 +208,15 @@ class MLLMSAMPipeline:
             # 2.2 执行相应操作
             action = mllm_response.get("name")
             tool_params = mllm_response.get("parameters", {})
+            if action in {"object_locator", "concept_generator", "image_enhancer", "report_no_mask"}:
+                self._emit_event(
+                    {
+                        "type": "tool_selected",
+                        "iteration": self.state["iteration"],
+                        "tool": action,
+                        "params": tool_params,
+                    }
+                )
             
             if action == "report_no_mask":
                 print("经过仔细查看图片，未找到与查询相匹配的内容，结束流程")
@@ -420,6 +453,16 @@ class MLLMSAMPipeline:
             zoomed_review_image.save(zoom_save_path)
             print(f"检查图像已保存: {save_path}")
             print(f"放大检查图像已保存: {zoom_save_path}")
+            if method in {"object_locator", "concept_generator", "image_enhancer"}:
+                self._emit_event(
+                    {
+                        "type": "segmentation_result",
+                        "iteration": self.state["iteration"],
+                        "tool": method,
+                        "score": float(best_seg["score"]),
+                        "check_image_path": str(save_path),
+                    }
+                )
             
             # 评估结果
             print("调用MLLM评估分割质量...")
@@ -450,6 +493,14 @@ class MLLMSAMPipeline:
                     print(f"警告: 拒绝但未检测到序号，默认为最后一个: {rejected_indices}")
                 
                 print(f"拒绝的序号: {rejected_indices}")
+            self._emit_event(
+                {
+                    "type": "evaluation",
+                    "iteration": self.state["iteration"],
+                    "verdict": verdict,
+                    "rejectedIndices": list(rejected_indices),
+                }
+            )
             
             # 根据评估更新状态
             if verdict == "Accept":
