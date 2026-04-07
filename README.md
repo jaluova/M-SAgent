@@ -38,18 +38,17 @@ M-SAgent/
 - `tools/object_locator.py`: localization entry, now supporting embedded GridGround and HTTP fallback.
 - `sam_processor.py`: wraps SAM3 image setup, point prompts, text prompts, and visualization.
 
-## Quick Start
+## Setup
 
 ### 1. Create the environment
 
 Follow [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) for the tested setup.
 
-Minimal flow:
-
 ```bash
 conda create -n m_sagent python=3.10 -y
 conda activate m_sagent
 
+# Pick the torch index that matches your CUDA version.
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
@@ -59,7 +58,7 @@ pip install -r requirements.txt
 You need local access to:
 
 - `Qwen/Qwen2.5-VL-7B-Instruct`
-- a `SAM3` checkpoint
+- a `facebook/sam3` checkpoint
 - `alpharho/GridGround-TextGuided` from ModelScope
 
 You can download the GridGround snapshot with:
@@ -68,7 +67,7 @@ You can download the GridGround snapshot with:
 python scripts/download_gridground_model.py
 ```
 
-### 3. Set paths
+### 3. Set runtime paths
 
 Typical environment variables:
 
@@ -78,21 +77,112 @@ export M_SAGENT_SAM3_CHECKPOINT_PATH=/path/to/sam3.pt
 export GRIDGROUND_MODEL_DIR=/path/to/GridGround-TextGuided
 ```
 
-### 4. Run
-
-Direct CLI:
+If you want to use the checked-in "single GPU stable" defaults, the wrapper script also understands:
 
 ```bash
-python main.py --image sam3/assets/images/truck.jpg --text "truck"
+export M_SAGENT_PYTHON=/path/to/python
+export M_SAGENT_SAM3_MODEL_PATH=/path/to/M-SAgent/sam3
 ```
 
-Single-GPU stable profile:
+## Start the Project
+
+There are three common ways to run `M-SAgent`, depending on whether you want the CLI, the backend API, or the web UI.
+
+### Option 1: Run a single segmentation job from the CLI
+
+This is the simplest way to verify the pipeline is working.
+
+```bash
+python main.py \
+  --image sam3/assets/images/truck.jpg \
+  --text "truck"
+```
+
+Recommended on the target server: use the wrapper script instead of calling `main.py` directly. It sets the expected model paths, GPU checks, and GridGround defaults.
 
 ```bash
 ./scripts/run_single_gpu_stable.sh \
   --image sam3/assets/images/truck.jpg \
   --text "truck"
 ```
+
+### Option 2: Start the backend API
+
+The FastAPI app is defined in [server/app.py](server/app.py). Start it with:
+
+```bash
+python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+Useful checks:
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+Default server settings come from [server/config.py](server/config.py):
+
+- host: `0.0.0.0`
+- port: `8000`
+- frontend dev origin allowlist: `http://127.0.0.1:5173,http://localhost:5173`
+
+If you want to override them:
+
+```bash
+export M_SAGENT_SERVER_HOST=0.0.0.0
+export M_SAGENT_SERVER_PORT=8000
+export M_SAGENT_SERVER_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+```
+
+### Option 3: Start the web frontend
+
+The frontend lives in [frontend](frontend). For local development:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+By default the Vite dev server runs on `http://127.0.0.1:5173` or `http://localhost:5173`.
+
+### Full local dev workflow
+
+If you want the full web app locally, run the backend and frontend in two terminals:
+
+Terminal 1:
+
+```bash
+python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+Terminal 2:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open:
+
+- frontend: `http://127.0.0.1:5173`
+- backend health: `http://127.0.0.1:8000/api/health`
+
+### Serve the built frontend from FastAPI
+
+If you want a single backend process to serve both API and static frontend files:
+
+```bash
+cd frontend
+npm install
+npm run build
+
+cd ..
+python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+After the build, the backend serves `frontend/dist` at `/`.
 
 ## Localization Backends
 
