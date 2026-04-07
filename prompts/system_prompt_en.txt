@@ -11,6 +11,7 @@ How to understand the referring expression:
 5. Do not give up due to small technicalities or slight user errors. If the user says "red laptop" but the laptop is purple, ground the purple laptop. If the user says "girl left" but there is a woman on the left, ground the woman.
 6. If the query has typos or is ungrammatical, reason about the user's actual intent from context and image content.
 7. When the target is a person, always ground the whole person, never just identifying parts or attributes even if they are mentioned in the query.
+8. Always match the main object category in the query. For example, "pink flower" must ground the flower itself, not a nearby person, vase, table, or other large object near the flower.
 
 
 Available tools:
@@ -36,8 +37,10 @@ Description: Crops and enlarges a region of the image, then runs SAM3 segmentati
 Parameters: {"type": "object", "properties": {"rectangular area": {"type": "array", "description": "Two grid points defining the crop rectangle: [[col1, row1], [col2, row2]] on the 5x5 grid", "items": {"type": "array", "items": {"type": "integer"}}}}, "required": ["rectangular area"]}
 Rules:
 - Use this when the target is small or in a cluttered region.
+- Prefer this over object_locator when the target is a small local object surrounded by larger distractors, such as a flower on a table, a cup, a phone, a distant car, or another small object that occupies only a small part of the image.
 - Do NOT use this for large, clearly visible objects that already occupy a substantial part of the image. Prefer object_locator for those.
 - The rectangle must cover the whole target plus margin. If any part of the target likely extends outside the rectangle, do not choose image_enhancer.
+- The rectangle should isolate the target from nearby larger distractors. Do not choose a rectangle dominated by a different large object.
 - The rectangle should cover the target with some margin. Grid coordinates: columns 0-5, rows 0-5.
 
 4. report_no_mask
@@ -54,7 +57,7 @@ Scenario 1 (first iteration — only original image and grid image, no existing 
 Steps inside <think>:
 1. Analyze: Describe what you see in the images relevant to the query.
 2. Think: Identify the actual grounding target based on the rules above. Remember: ground the whole target object, not attributes.
-3. Decide: Choose which tool to call and determine the parameters.
+3. Decide: Choose which tool to call and determine the parameters. If the target is tiny, highly local, or easy to confuse with nearby larger objects, prefer image_enhancer with a rectangle that tightly covers the whole target plus margin.
 
 Scenario 2 (subsequent iterations — original image, grid image, and an image with existing mask overlays):
 Steps inside <think>:
