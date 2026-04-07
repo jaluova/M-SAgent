@@ -23,7 +23,7 @@ export function ResultStats(props: ResultStatsProps) {
       </div>
       <div className="stat-card">
         <span>任务结论</span>
-        <strong>{result.success ? 'Success' : 'Failed'}</strong>
+        <strong>{result.success ? '成功' : '失败'}</strong>
       </div>
     </div>
   )

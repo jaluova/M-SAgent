@@ -14,7 +14,7 @@ export function MaskOverlay(props: MaskOverlayProps) {
 
   const overlaySrc = mode === 'mask' ? result.maskUrl : null
   const resultPreviewSrc = result.resultPreviewUrl ?? result.resultImageUrl
-  const maskBaseSrc = resultPreviewSrc ?? sourceImageUrl
+  const maskBaseSrc = sourceImageUrl ?? resultPreviewSrc
   const baseSrc = mode === 'mask' ? maskBaseSrc : resultPreviewSrc
 
   return (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { UploadPanel } from './features/upload/UploadPanel'
 import { ProgressPanel } from './features/progress/ProgressPanel'
+import { LogPanel } from './features/progress/LogPanel'
 import { ResultPanel } from './features/result/ResultPanel'
 import { MainLayout } from './layouts/MainLayout'
 import { useJob } from './hooks/useJob'
@@ -27,15 +28,16 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
-async function createPreviewUrl(file: File): Promise<string> {
-  const originalObjectUrl = URL.createObjectURL(file)
-
+async function createPreviewUrl(
+  sourceUrl: string,
+  fileType: string,
+): Promise<string | null> {
   try {
-    const image = await loadImageElement(originalObjectUrl)
+    const image = await loadImageElement(sourceUrl)
     const { naturalWidth, naturalHeight } = image
 
     if (!naturalWidth || !naturalHeight) {
-      return originalObjectUrl
+      return null
     }
 
     const scale = Math.min(
@@ -44,7 +46,7 @@ async function createPreviewUrl(file: File): Promise<string> {
     )
 
     if (scale >= 0.999) {
-      return originalObjectUrl
+      return null
     }
 
     const canvas = document.createElement('canvas')
@@ -53,28 +55,24 @@ async function createPreviewUrl(file: File): Promise<string> {
 
     const context = canvas.getContext('2d')
     if (!context) {
-      return originalObjectUrl
+      return null
     }
 
     context.drawImage(image, 0, 0, canvas.width, canvas.height)
 
     const previewBlob = await new Promise<Blob | null>((resolve) => {
-      const preferredType =
-        file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+      const preferredType = fileType === 'image/png' ? 'image/png' : 'image/jpeg'
       const quality = preferredType === 'image/png' ? undefined : 0.9
       canvas.toBlob(resolve, preferredType, quality)
     })
 
     if (!previewBlob) {
-      return originalObjectUrl
+      return null
     }
 
-    const previewUrl = URL.createObjectURL(previewBlob)
-    URL.revokeObjectURL(originalObjectUrl)
-    return previewUrl
+    return URL.createObjectURL(previewBlob)
   } catch {
-    URL.revokeObjectURL(originalObjectUrl)
-    return URL.createObjectURL(file)
+    return null
   }
 }
 
@@ -98,30 +96,38 @@ function App() {
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selectedFile) {
       setPreviewUrl(null)
+      setSourceImageUrl(null)
       return
     }
 
     let revoked = false
-    let currentUrl: string | null = null
+    const originalUrl = URL.createObjectURL(selectedFile)
+    let currentPreviewUrl: string | null = null
 
-    void createPreviewUrl(selectedFile).then((nextUrl) => {
+    setSourceImageUrl(originalUrl)
+
+    void createPreviewUrl(originalUrl, selectedFile.type).then((nextUrl) => {
       if (revoked) {
-        URL.revokeObjectURL(nextUrl)
+        if (nextUrl) {
+          URL.revokeObjectURL(nextUrl)
+        }
         return
       }
 
-      currentUrl = nextUrl
-      setPreviewUrl(nextUrl)
+      currentPreviewUrl = nextUrl
+      setPreviewUrl(nextUrl ?? originalUrl)
     })
 
     return () => {
       revoked = true
-      if (currentUrl) {
-        URL.revokeObjectURL(currentUrl)
+      URL.revokeObjectURL(originalUrl)
+      if (currentPreviewUrl) {
+        URL.revokeObjectURL(currentPreviewUrl)
       }
     }
   }, [selectedFile])
@@ -172,31 +178,30 @@ function App() {
           onReset={handleReset}
         />
       }
-      rightColumn={
-        <>
-          {showProgress ? (
-            <ProgressPanel
-              jobStatus={jobStatus}
-              queuePosition={queuePosition}
-              currentIteration={currentIteration}
-              currentTool={currentTool}
-              iterations={iterations}
-              events={events}
-            />
-          ) : (
-            <section className="panel panel--empty">
-              <h2>等待任务</h2>
-            </section>
-          )}
-
-          {result ? (
-            <ResultPanel result={result} sourceImageUrl={previewUrl} />
-          ) : (
-            <section className="panel panel--empty">
-              <h2>结果会显示在这里</h2>
-            </section>
-          )}
-        </>
+      centerColumn={
+        showProgress ? (
+          <ProgressPanel
+            jobStatus={jobStatus}
+            queuePosition={queuePosition}
+            currentIteration={currentIteration}
+            currentTool={currentTool}
+            iterations={iterations}
+          />
+        ) : (
+          <section className="panel panel--empty">
+            <h2>中间产物会显示在这里</h2>
+          </section>
+        )
+      }
+      rightColumn={<LogPanel events={events} />}
+      bottomSection={
+        result ? (
+          <ResultPanel result={result} sourceImageUrl={sourceImageUrl} />
+        ) : (
+          <section className="panel panel--empty">
+            <h2>可视化成果会显示在这里</h2>
+          </section>
+        )
       }
     />
   )

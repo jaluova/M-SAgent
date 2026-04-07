@@ -104,10 +104,10 @@ export function UploadPanel(props: UploadPanelProps) {
       </div>
 
       <div className="field-group">
-        <label htmlFor="query">Referring Expression</label>
+        <label htmlFor="query">指代表达</label>
         <textarea
           id="query"
-          placeholder="例如：the red truck on the right"
+          placeholder="例如：右侧那辆红色卡车"
           value={textQuery}
           onChange={(event) => onTextChange(event.target.value)}
         />

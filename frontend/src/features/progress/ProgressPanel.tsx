@@ -1,12 +1,19 @@
 import {
   type IterationSnapshot,
   type JobLifecycleStatus,
-  type ProgressEvent,
   type ToolName,
 } from '../../types/job'
 import { IterationTimeline } from './IterationTimeline'
-import { AgentLogStream } from './AgentLogStream'
 import { ToolBadge } from './ToolBadge'
+
+const statusLabels: Record<JobLifecycleStatus, string> = {
+  idle: '未开始',
+  uploading: '上传中',
+  queued: '排队中',
+  running: '运行中',
+  complete: '已完成',
+  failed: '失败',
+}
 
 interface ProgressPanelProps {
   readonly jobStatus: JobLifecycleStatus
@@ -14,7 +21,6 @@ interface ProgressPanelProps {
   readonly currentIteration: number
   readonly currentTool: ToolName | null
   readonly iterations: ReadonlyArray<IterationSnapshot>
-  readonly events: ReadonlyArray<ProgressEvent>
 }
 
 export function ProgressPanel(props: ProgressPanelProps) {
@@ -24,15 +30,14 @@ export function ProgressPanel(props: ProgressPanelProps) {
     currentIteration,
     currentTool,
     iterations,
-    events,
   } = props
 
   return (
     <section className="panel">
       <div className="panel__header">
         <div>
-          <p className="eyebrow">进度</p>
-          <h2>运行中</h2>
+          <p className="eyebrow">过程</p>
+          <h2>中间产物</h2>
         </div>
         <ToolBadge tool={currentTool} />
       </div>
@@ -40,7 +45,7 @@ export function ProgressPanel(props: ProgressPanelProps) {
       <div className="progress-summary">
         <div className="summary-card">
           <span>状态</span>
-          <strong>{jobStatus}</strong>
+          <strong>{statusLabels[jobStatus]}</strong>
         </div>
         <div className="summary-card">
           <span>轮次</span>
@@ -52,15 +57,7 @@ export function ProgressPanel(props: ProgressPanelProps) {
         </div>
       </div>
 
-      <div className="stack">
-        <div>
-          <IterationTimeline iterations={iterations} />
-        </div>
-
-        <div>
-          <AgentLogStream events={events} />
-        </div>
-      </div>
+      <IterationTimeline iterations={iterations} />
     </section>
   )
 }

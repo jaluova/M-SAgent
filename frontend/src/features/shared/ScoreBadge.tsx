@@ -17,5 +17,5 @@ export function ScoreBadge(props: ScoreBadgeProps) {
         ? 'score-badge--medium'
         : 'score-badge--low'
 
-  return <span className={`score-badge ${tone}`}>Score {score.toFixed(3)}</span>
+  return <span className={`score-badge ${tone}`}>分数 {score.toFixed(3)}</span>
 }

@@ -27,10 +27,14 @@ export function IterationTimeline(props: IterationTimelineProps) {
           <article className="iteration-card" key={item.iteration}>
             <div className="iteration-card__header">
               <div>
-                <p className="eyebrow">Iteration {item.iteration}</p>
+                <p className="eyebrow">第 {item.iteration} 轮</p>
               </div>
               <span className={`verdict-pill ${verdictTone}`}>
-                {item.verdict === 'pending' ? '等待评估' : item.verdict}
+                {item.verdict === 'pending'
+                  ? '等待评估'
+                  : item.verdict === 'Accept'
+                    ? '通过'
+                    : '拒绝'}
               </span>
             </div>
 
@@ -41,7 +45,7 @@ export function IterationTimeline(props: IterationTimelineProps) {
 
             {item.checkImageUrl ? (
               <div className="iteration-card__preview">
-                <img src={item.checkImageUrl} alt={`Iteration ${item.iteration}`} />
+                <img src={item.checkImageUrl} alt={`第 ${item.iteration} 轮检查图`} />
               </div>
             ) : null}
           </article>

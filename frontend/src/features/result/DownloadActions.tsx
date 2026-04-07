@@ -15,14 +15,14 @@ export function DownloadActions(props: DownloadActionsProps) {
           <strong>下载结果图</strong>
           <span>JPEG / PNG 可视化结果</span>
         </div>
-        <span>Open</span>
+        <span>打开</span>
       </a>
       <a className="download-link" href={result.maskUrl} target="_blank" rel="noreferrer">
         <div>
           <strong>下载掩码 PNG</strong>
           <span>用于快速校验和展示</span>
         </div>
-        <span>Open</span>
+        <span>打开</span>
       </a>
       <a
         className="download-link"
@@ -34,7 +34,7 @@ export function DownloadActions(props: DownloadActionsProps) {
           <strong>下载掩码 NPY</strong>
           <span>用于离线处理或进一步分析</span>
         </div>
-        <span>Open</span>
+        <span>打开</span>
       </a>
     </div>
   )

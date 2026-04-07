@@ -9,13 +9,13 @@ function describeEvent(event: ProgressEvent): string {
     case 'iteration_start':
       return `第 ${event.iteration} / ${event.maxIterations} 轮`
     case 'tool_selected':
-      return `${event.iteration} 轮使用 ${event.tool}`
+      return `${event.iteration} 轮调用 ${event.tool}`
     case 'segmentation_result':
       return event.tool === 'image_enhancer'
         ? `${event.iteration} 轮完成分割`
         : `${event.iteration} 轮得分 ${event.score.toFixed(3)}`
     case 'evaluation':
-      return `${event.iteration} 轮 ${event.verdict}`
+      return `${event.iteration} 轮 ${event.verdict === 'Accept' ? '通过' : '拒绝'}`
     case 'complete':
       return `完成 ${event.result.bestScore.toFixed(3)}`
     case 'error':

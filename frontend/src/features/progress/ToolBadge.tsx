@@ -1,10 +1,10 @@
 import { type ToolName } from '../../types/job'
 
 const toolLabels: Record<ToolName, string> = {
-  object_locator: 'Locator',
-  concept_generator: 'Concept',
-  image_enhancer: 'Enhancer',
-  report_no_mask: 'No Mask',
+  object_locator: '目标定位',
+  concept_generator: '概念生成',
+  image_enhancer: '图像增强',
+  report_no_mask: '未找到目标',
 }
 
 interface ToolBadgeProps {
