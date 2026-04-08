@@ -12,13 +12,11 @@ fi
 export M_SAGENT_DEPLOYMENT_PROFILE="${M_SAGENT_DEPLOYMENT_PROFILE:-${PROFILE}}"
 export M_SAGENT_BASE_DIR="${M_SAGENT_BASE_DIR:-${PROJECT_ROOT}}"
 export M_SAGENT_QWEN_MODEL_PATH="${M_SAGENT_QWEN_MODEL_PATH:-/root/autodl-tmp/modelscope/Qwen2.5-VL-7B-Instruct}"
-export M_SAGENT_SAM3_MODEL_PATH="${M_SAGENT_SAM3_MODEL_PATH:-${PROJECT_ROOT}/sam3}"
 export M_SAGENT_SAM3_CHECKPOINT_PATH="${M_SAGENT_SAM3_CHECKPOINT_PATH:-/root/autodl-tmp/modelscope_cache_sam3/facebook/sam3/sam3.pt}"
 export GRIDGROUND_BACKEND="${GRIDGROUND_BACKEND:-embedded}"
 export GRIDGROUND_MODEL_ID="${GRIDGROUND_MODEL_ID:-alpharho/GridGround-TextGuided}"
 export GRIDGROUND_MODEL_DIR="${GRIDGROUND_MODEL_DIR:-/root/autodl-tmp/modelscope_cache_gridground/${GRIDGROUND_MODEL_ID}}"
 export M_SAGENT_SYSTEM_PROMPT="${M_SAGENT_SYSTEM_PROMPT:-${PROJECT_ROOT}/prompts/system_prompt_en.txt}"
-export M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING="${M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING:-${PROJECT_ROOT}/sam3/sam3/agent/system_prompts/system_prompt_iterative_checking.txt}"
 export TRAIN_ADAPTER_ENABLED="${TRAIN_ADAPTER_ENABLED:-true}"
 export TRAIN_ADAPTER_URL="${TRAIN_ADAPTER_URL:-http://127.0.0.1:8765}"
 export TRAIN_ADAPTER_EXPECTED_DEVICE="${TRAIN_ADAPTER_EXPECTED_DEVICE:-cpu}"
@@ -29,14 +27,29 @@ export M_SAGENT_MLLM_MAX_PIXELS="${M_SAGENT_MLLM_MAX_PIXELS:-1048576}"
 export M_SAGENT_MIN_FREE_GPU_MB="${M_SAGENT_MIN_FREE_GPU_MB:-20000}"
 
 M_SAGENT_PYTHON="${M_SAGENT_PYTHON:-/root/autodl-tmp/conda-envs/m_sagent/bin/python}"
+M_SAGENT_SAM3_MODEL_PATH="${M_SAGENT_SAM3_MODEL_PATH:-/root/autodl-tmp/sam3}"
+M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING="${M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING:-${M_SAGENT_SAM3_MODEL_PATH}/sam3/agent/system_prompts/system_prompt_iterative_checking.txt}"
+export M_SAGENT_SAM3_MODEL_PATH
+export M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING
 
 if [[ ! -x "${M_SAGENT_PYTHON}" ]]; then
   echo "M-SAgent python not found: ${M_SAGENT_PYTHON}" >&2
   exit 1
 fi
 
+if [[ ! -d "${M_SAGENT_SAM3_MODEL_PATH}/sam3" ]]; then
+  echo "SAM3 code dir not found under M_SAGENT_SAM3_MODEL_PATH: ${M_SAGENT_SAM3_MODEL_PATH}" >&2
+  echo "Provide an external SAM3 checkout and export M_SAGENT_SAM3_MODEL_PATH before running." >&2
+  exit 1
+fi
+
 if [[ ! -f "${M_SAGENT_SAM3_CHECKPOINT_PATH}" ]]; then
   echo "SAM3 checkpoint not found: ${M_SAGENT_SAM3_CHECKPOINT_PATH}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING}" ]]; then
+  echo "SAM3 iterative checking prompt not found: ${M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING}" >&2
   exit 1
 fi
 
@@ -94,6 +107,7 @@ echo "  gridground_backend: ${GRIDGROUND_BACKEND}"
 echo "  gridground_model_dir: ${GRIDGROUND_MODEL_DIR}"
 echo "  train_adapter_url: ${TRAIN_ADAPTER_URL}"
 echo "  localization_device: ${SERVICE_DEVICE}"
+echo "  sam3_model_path: ${M_SAGENT_SAM3_MODEL_PATH}"
 echo "  sam3_checkpoint: ${M_SAGENT_SAM3_CHECKPOINT_PATH}"
 echo "  mllm_pixels: ${M_SAGENT_MLLM_MIN_PIXELS}-${M_SAGENT_MLLM_MAX_PIXELS}"
 

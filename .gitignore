@@ -12,6 +12,7 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .mypy_cache/
+frontend/dist/
 
 # Virtual environments
 .venv/
@@ -31,3 +32,5 @@ temp_*.npy
 
 # Local SAM3 runtime artifacts
 sam3/results/
+
+docs/

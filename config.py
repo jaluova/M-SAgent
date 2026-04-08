@@ -107,7 +107,6 @@ class Config:
     ))
     SAM3_MODEL_PATH = str(_resolve_existing_path(
         os.environ.get("M_SAGENT_SAM3_MODEL_PATH"),
-        BASE_DIR / "sam3",
         Path("/root/autodl-tmp/sam3"),
     ))
     SAM3_CHECKPOINT_PATH = str(_resolve_existing_path(
@@ -150,12 +149,11 @@ class Config:
         os.environ.get("M_SAGENT_SYSTEM_PROMPT"),
         BASE_DIR / "prompts" / "system_prompt_en.txt",
         BASE_DIR / "1.txt",
-        BASE_DIR / "sam3" / "sam3" / "agent" / "system_prompts" / "system_prompt.txt",
     )
     SYSTEM_PROMPT_ITERATIVE_CHECKING = _resolve_existing_path(
         os.environ.get("M_SAGENT_SYSTEM_PROMPT_ITERATIVE_CHECKING"),
+        Path(SAM3_MODEL_PATH) / "sam3" / "agent" / "system_prompts" / "system_prompt_iterative_checking.txt",
         BASE_DIR / "prompts" / "system_prompt_iterative_checking_en.txt",
-        BASE_DIR / "sam3" / "sam3" / "agent" / "system_prompts" / "system_prompt_iterative_checking.txt",
     )
 
     # 工具调用中间记录保存路径

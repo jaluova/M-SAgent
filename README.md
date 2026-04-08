@@ -52,7 +52,6 @@ M-SAgent/
 ├── frontend/                    # React + Vite 前端
 ├── gridground_runtime/          # 内嵌 GridGround 运行时
 ├── prompts/                     # 系统提示词
-├── sam3/                        # vendored SAM3 代码
 ├── scripts/                     # 启动、下载与部署脚本
 ├── utils/                       # 图像、可视化、定位辅助工具
 └── example/                     # 示例图片
@@ -86,6 +85,8 @@ pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorc
 pip install -r requirements.txt
 ```
 
+`SAM3` 代码不再作为仓库内置依赖分发。运行前请单独准备一份外部 `SAM3` 代码目录，并在启动前设置 `M_SAGENT_SAM3_MODEL_PATH`。
+
 如果要开发或重建前端：
 
 ```bash
@@ -100,7 +101,7 @@ npm install
 ```bash
 export M_SAGENT_PYTHON=/path/to/python
 export M_SAGENT_QWEN_MODEL_PATH=/path/to/Qwen2.5-VL-7B-Instruct
-export M_SAGENT_SAM3_MODEL_PATH=/path/to/M-SAgent/sam3
+export M_SAGENT_SAM3_MODEL_PATH=/path/to/external/sam3
 export M_SAGENT_SAM3_CHECKPOINT_PATH=/path/to/sam3.pt
 export GRIDGROUND_MODEL_DIR=/path/to/GridGround-TextGuided
 ```
@@ -111,7 +112,7 @@ export GRIDGROUND_MODEL_DIR=/path/to/GridGround-TextGuided
 | --- | --- |
 | `M_SAGENT_PYTHON` | 启动脚本使用的 Python 解释器 |
 | `M_SAGENT_QWEN_MODEL_PATH` | Qwen2.5-VL 模型目录 |
-| `M_SAGENT_SAM3_MODEL_PATH` | `sam3/` 代码所在目录 |
+| `M_SAGENT_SAM3_MODEL_PATH` | 外部 `SAM3` 代码目录 |
 | `M_SAGENT_SAM3_CHECKPOINT_PATH` | SAM3 权重文件 |
 | `GRIDGROUND_MODEL_DIR` | GridGround 模型目录 |
 | `GRIDGROUND_BACKEND` | 定位后端，通常为 `embedded` 或 `http` |
@@ -119,6 +120,10 @@ export GRIDGROUND_MODEL_DIR=/path/to/GridGround-TextGuided
 | `TRAIN_ADAPTER_URL` | 外部定位服务地址，默认 `http://127.0.0.1:8765` |
 | `M_SAGENT_SERVER_HOST` | Web 服务监听地址 |
 | `M_SAGENT_SERVER_PORT` | Web 服务端口，默认 `8000` |
+
+## 源码提交说明
+
+比赛源码包建议仅包含本仓库中的团队自研代码与必要工程文件，不包含第三方 `SAM3` 源码、前端构建产物、缓存目录和本地版本控制元数据。开发环境可以保留本地 `sam3/` 目录，但提交压缩包时建议排除 `sam3/`、`frontend/dist/`、`__pycache__/`、`.git/` 和 `.DS_Store`。
 
 如果本地还没有 GridGround 权重，可以用脚本下载：
 

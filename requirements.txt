@@ -15,5 +15,4 @@ modelscope==1.35.3
 fastapi==0.116.1
 uvicorn==0.35.0
 python-multipart==0.0.20
-
--e ./sam3
+# Install SAM3 separately and point M_SAGENT_SAM3_MODEL_PATH to that directory.
