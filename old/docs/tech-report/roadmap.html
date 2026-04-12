@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M-SAgent 整改路线</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="masthead">
+        <div class="brand-row">
+          <div>
+            <p class="brand-eyebrow">Roadmap</p>
+            <h1 class="brand-title">整改路线：先修什么，后修什么</h1>
+            <p class="brand-subtitle">
+              这一页不是“所有想法都写上去”的愿望清单，而是按静态证据强弱、改造风险、收益和依赖关系排过序的整改方案。
+            </p>
+          </div>
+        </div>
+        <nav class="nav-links" aria-label="主导航">
+          <a href="./index.html">首页</a>
+          <a href="./architecture.html">架构解析</a>
+          <a href="./defects.html">缺陷诊断</a>
+          <a href="./roadmap.html" aria-current="page">整改路线</a>
+        </nav>
+      </header>
+
+      <main class="content-grid">
+        <section class="card">
+          <section class="page-section">
+            <span class="section-kicker">优先级总览</span>
+            <h2>先别急着碰模型，把台面收干净</h2>
+            <p class="lede">
+              从静态分析看，最合理的顺序不是一上来猛调 prompt 或阈值，而是先把
+              “文档和实现漂移、闲置状态、回退边界、日志和协议说明”收拢。因为只有系统行为先变得可理解，后面的效果优化才不会变成盲猜。
+            </p>
+            <div class="figure-card">
+              <button
+                type="button"
+                data-zoom-src="./assets/roadmap-priority.svg"
+                data-zoom-alt="整改优先级图"
+                data-zoom-caption="整改优先级图：P0 收台面，P1 清边界，P2 做效果策略优化。"
+              >
+                <img src="./assets/roadmap-priority.svg" alt="整改优先级图" />
+              </button>
+              <div class="figure-caption">
+                图 5. 整改优先级图。
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" id="p0">
+            <span class="section-kicker">P0</span>
+            <h2>高信心、低风险、立刻能改善可维护性的问题</h2>
+            <div class="roadmap-grid">
+              <article class="roadmap-card">
+                <h3>统一配置与文档漂移</h3>
+                <p>清理 <code>example/examples</code>、旧 <code>output_dir</code> 描述、默认值说明，让启动失败不再伪装成模型效果差。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>收敛闲置状态</h3>
+                <p>梳理并删除或注释解释几乎不演化的字段，降低阅读与调试噪音。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>增强日志可解释性</h3>
+                <p>让工具选择、回退、评估拒绝时输出更清楚的原因摘要，而不只是“失败/Reject”。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>补接口与运行说明</h3>
+                <p>把前后端协议、结果文件和事件流写成开发文档，降低误解系统行为的成本。</p>
+              </article>
+            </div>
+            <details open>
+              <summary>P0 为什么要先做</summary>
+              <div>
+                <p>
+                  这些问题不一定直接提高 cIoU，但会显著减少误配置、误判和“我不知道现在系统到底在干嘛”的状态。
+                  你后面想改定位、评估或 prompt，都会更有把握。
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section class="page-section" id="p1">
+            <span class="section-kicker">P1</span>
+            <h2>需要代码重构，但静态上已经能判断值得改的部分</h2>
+            <div class="roadmap-grid">
+              <article class="roadmap-card">
+                <h3>重构定位后端抽象</h3>
+                <p>把 embedded GridGround、HTTP TrainAdapter、MLLM fallback 明确成等价的 provider 边界，别再让默认回退逻辑藏在初始化细节里。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>显式化工具回退策略</h3>
+                <p>把“解析失败”“工具失败”“评估拒绝”这几类失败分开处理，避免多层 fallback 叠在一起。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>收拢 pipeline 状态模型</h3>
+                <p>只保留真正参与控制流的状态，把视觉上下文、候选集和工具历史建成更明确的结构。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>补前后端事件说明</h3>
+                <p>让 WS 与轮询的职责边界更清楚，必要时增加去重或版本号机制。</p>
+              </article>
+            </div>
+            <details open>
+              <summary>P1 预期收益</summary>
+              <div>
+                <p>
+                  P1 的核心价值不是“立刻涨点”，而是让系统行为变得稳定、可理解、可比较。没有这一层，P2 的效果优化会很难判断到底是模型变好了，还是只是换了条回退路径。
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section class="page-section" id="p2">
+            <span class="section-kicker">P2</span>
+            <h2>必须结合实跑验证的效果优化项</h2>
+            <div class="roadmap-grid">
+              <article class="roadmap-card">
+                <h3>工具选择 prompt 调优</h3>
+                <p>检查 Qwen 到底在什么图像和查询上选错了工具，再改 system prompt 与用户提示构造。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>评估策略重构</h3>
+                <p>给评估阶段加入更结构化的失败原因，而不是只给 Accept/Reject。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>裁剪增强策略</h3>
+                <p>验证 <code>image_enhancer</code> 的网格框、放大尺度、截断拒绝规则是否过于保守或不稳定。</p>
+              </article>
+              <article class="roadmap-card">
+                <h3>定位阈值与动态 top-k</h3>
+                <p>比较 embedded 与 HTTP 路径在点质量上的差异，重新审视阈值配置和点扩展策略。</p>
+              </article>
+            </div>
+            <details open>
+              <summary>P2 的前提</summary>
+              <div>
+                <p>
+                  这里已经超出静态分析能力边界了。真正做 P2 时，必须配套失败样例、可复现实验记录、修改前后对比和最小回归测试。
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section class="page-section" id="execution-order">
+            <span class="section-kicker">执行顺序</span>
+            <h2>如果明天开始改，建议按这个顺序推进</h2>
+            <ol class="toc">
+              <li>先做 P0：清理文档漂移、闲置状态、日志和接口说明。</li>
+              <li>再做 P1：把定位后端和回退链路从“隐式行为”改成“显式结构”。</li>
+              <li>等系统行为更可解释后，再做 P2 的实跑优化。</li>
+              <li>在每个阶段结束时补一份“小规模回归样例集”，哪怕只有人工挑选的十几张图。</li>
+            </ol>
+          </section>
+        </section>
+
+        <aside class="sidebar-card">
+          <h2 class="section-title">页内导航</h2>
+          <ol class="toc">
+            <li><a href="#p0">P0</a></li>
+            <li><a href="#p1">P1</a></li>
+            <li><a href="#p2">P2</a></li>
+            <li><a href="#execution-order">执行顺序</a></li>
+          </ol>
+          <h2 class="section-title" style="margin-top: 24px;">返回缺陷</h2>
+          <ul class="priority-list">
+            <li><a href="./defects.html#effect-defects">效果问题</a></li>
+            <li><a href="./defects.html#stability-defects">稳定性与维护性</a></li>
+            <li><a href="./defects.html#product-defects">产品体验</a></li>
+          </ul>
+        </aside>
+      </main>
+
+      <p class="footer-note">
+        如果你想从整体重新建立心智模型，可以回到 <a href="./architecture.html">架构解析</a>。
+      </p>
+    </div>
+
+    <div class="lightbox" aria-hidden="true" data-lightbox>
+      <div class="lightbox-inner">
+        <div class="lightbox-toolbar">
+          <strong data-lightbox-caption></strong>
+          <button type="button" data-lightbox-close>关闭</button>
+        </div>
+        <img data-lightbox-image alt="" />
+      </div>
+    </div>
+    <script src="./script.js"></script>
+  </body>
+</html>

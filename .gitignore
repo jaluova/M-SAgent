@@ -33,4 +33,6 @@ temp_*.npy
 # Local SAM3 runtime artifacts
 sam3/results/
 
-docs/
+docs/*
+!docs/tech-report/
+!docs/tech-report/**

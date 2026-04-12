@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" fill="none">
+  <rect width="1280" height="720" rx="28" fill="#FBF7F0"/>
+  <text x="66" y="78" fill="#8E4B2C" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">整改优先级图</text>
+  <text x="66" y="112" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">不是先调模型，而是先让系统行为更可理解、更可验证</text>
+
+  <rect x="88" y="170" width="1104" height="118" rx="24" fill="#EEF4E8" stroke="#A8C09A"/>
+  <text x="122" y="214" fill="#2D6A4F" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">P0 先收台面</text>
+  <text x="122" y="248" fill="#6A5E51" font-size="20" font-family="Arial, PingFang SC, sans-serif">配置/文档漂移、闲置状态清理、日志说明、接口说明补足</text>
+
+  <rect x="88" y="334" width="1104" height="118" rx="24" fill="#FFF3E4" stroke="#D7B28A"/>
+  <text x="122" y="378" fill="#A45C18" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">P1 再清边界</text>
+  <text x="122" y="412" fill="#6A5E51" font-size="20" font-family="Arial, PingFang SC, sans-serif">定位 provider 抽象、回退策略显式化、pipeline 状态模型收拢、前后端协议说明完善</text>
+
+  <rect x="88" y="498" width="1104" height="118" rx="24" fill="#FBE7E7" stroke="#D39D9D"/>
+  <text x="122" y="542" fill="#8B2F2F" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">P2 最后做效果优化</text>
+  <text x="122" y="576" fill="#6A5E51" font-size="20" font-family="Arial, PingFang SC, sans-serif">工具选择 prompt、评估策略、裁剪增强、定位阈值与动态 top-k，必须配合实跑验证</text>
+
+  <path d="M640 288V332" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M640 452V496" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+</svg>

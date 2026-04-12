@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" fill="none">
+  <rect width="1280" height="760" rx="28" fill="#FBF7F0"/>
+  <rect x="32" y="28" width="1216" height="704" rx="24" fill="#FFFDF9" stroke="#D8CFC2" stroke-width="2"/>
+  <text x="58" y="82" fill="#8E4B2C" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">M-SAgent 总体结构</text>
+  <text x="58" y="116" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">入口不同，但核心都汇入同一条多轮推理管线</text>
+
+  <rect x="60" y="156" width="250" height="116" rx="18" fill="#F7E8D9" stroke="#C9B39B"/>
+  <text x="84" y="196" fill="#54382A" font-size="24" font-family="Arial, PingFang SC, sans-serif" font-weight="700">CLI 入口</text>
+  <text x="84" y="228" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">run_single_gpu_stable.sh</text>
+  <text x="84" y="254" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">main.py -&gt; pipeline.run()</text>
+
+  <rect x="60" y="314" width="250" height="116" rx="18" fill="#F7E8D9" stroke="#C9B39B"/>
+  <text x="84" y="354" fill="#54382A" font-size="24" font-family="Arial, PingFang SC, sans-serif" font-weight="700">Web 入口</text>
+  <text x="84" y="386" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">uvicorn server.app:app</text>
+  <text x="84" y="412" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">JobManager -&gt; pipeline.run()</text>
+
+  <rect x="360" y="156" width="560" height="274" rx="22" fill="#FFF7EE" stroke="#BE9B7B" stroke-width="2"/>
+  <text x="388" y="196" fill="#8E4B2C" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">共享核心：MLLMSAMPipeline</text>
+  <text x="388" y="230" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">负责多轮循环、状态跟踪、工具分派、检查图生成与结果收敛</text>
+
+  <rect x="388" y="260" width="230" height="68" rx="14" fill="#FCECDD" stroke="#D2B49A"/>
+  <text x="408" y="302" fill="#54382A" font-size="22" font-family="Arial, PingFang SC, sans-serif" font-weight="700">MLLMProcessor</text>
+  <rect x="646" y="260" width="246" height="68" rx="14" fill="#FCECDD" stroke="#D2B49A"/>
+  <text x="666" y="302" fill="#54382A" font-size="22" font-family="Arial, PingFang SC, sans-serif" font-weight="700">SAMProcessor</text>
+
+  <rect x="388" y="346" width="156" height="60" rx="14" fill="#FFFDF8" stroke="#D9CDBE"/>
+  <text x="408" y="383" fill="#54382A" font-size="18" font-family="Arial, PingFang SC, sans-serif">Object Locator</text>
+  <rect x="558" y="346" width="164" height="60" rx="14" fill="#FFFDF8" stroke="#D9CDBE"/>
+  <text x="578" y="383" fill="#54382A" font-size="18" font-family="Arial, PingFang SC, sans-serif">Concept Generator</text>
+  <rect x="736" y="346" width="156" height="60" rx="14" fill="#FFFDF8" stroke="#D9CDBE"/>
+  <text x="756" y="383" fill="#54382A" font-size="18" font-family="Arial, PingFang SC, sans-serif">Image Enhancer</text>
+
+  <rect x="962" y="156" width="244" height="274" rx="22" fill="#F7EDE2" stroke="#CFB597"/>
+  <text x="986" y="196" fill="#8E4B2C" font-size="26" font-family="Arial, PingFang SC, sans-serif" font-weight="700">定位与共享主干</text>
+  <text x="986" y="234" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">Embedded GridGround</text>
+  <text x="986" y="262" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">HTTP TrainAdapter</text>
+  <text x="986" y="290" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">SharedQwenBackbone</text>
+  <text x="986" y="334" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">核心问题：</text>
+  <text x="986" y="362" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">定位质量直接决定 point prompt</text>
+  <text x="986" y="390" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">是否有机会交给 SAM 做出好 mask</text>
+
+  <rect x="60" y="504" width="552" height="170" rx="22" fill="#FFF7EE" stroke="#CFB597"/>
+  <text x="84" y="546" fill="#8E4B2C" font-size="26" font-family="Arial, PingFang SC, sans-serif" font-weight="700">后端服务层</text>
+  <text x="84" y="582" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">FastAPI + JobManager</text>
+  <text x="84" y="610" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">任务创建、队列消费、事件转发、结果文件标准化</text>
+  <text x="84" y="638" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">提供 /api/jobs, /api/health, /api/jobs/{id}/ws</text>
+
+  <rect x="646" y="504" width="560" height="170" rx="22" fill="#FFF7EE" stroke="#CFB597"/>
+  <text x="670" y="546" fill="#8E4B2C" font-size="26" font-family="Arial, PingFang SC, sans-serif" font-weight="700">前端消费层</text>
+  <text x="670" y="582" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">React + Zustand</text>
+  <text x="670" y="610" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">UploadPanel / ProgressPanel / LogPanel / ResultPanel</text>
+  <text x="670" y="638" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">WebSocket 事件流 + HTTP 快照轮询双通道同步</text>
+
+  <path d="M310 214H344" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M310 372H344" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M920 292H950" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M640 430V478" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M640 478H336V504" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M640 478H926V504" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+</svg>

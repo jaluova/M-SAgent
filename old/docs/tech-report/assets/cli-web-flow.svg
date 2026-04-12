@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" fill="none">
+  <rect width="1280" height="720" rx="28" fill="#FBF7F0"/>
+  <text x="66" y="78" fill="#8E4B2C" font-size="28" font-family="Arial, PingFang SC, sans-serif" font-weight="700">CLI 与 Web 调用链对照</text>
+  <text x="66" y="112" fill="#6A5E51" font-size="18" font-family="Arial, PingFang SC, sans-serif">入口不同，但都汇入同一条多轮推理管线</text>
+
+  <rect x="64" y="160" width="520" height="490" rx="26" fill="#FFFDF8" stroke="#D7CFC2" stroke-width="2"/>
+  <text x="92" y="202" fill="#8E4B2C" font-size="26" font-family="Arial, PingFang SC, sans-serif" font-weight="700">CLI 路径</text>
+
+  <rect x="92" y="238" width="464" height="64" rx="16" fill="#F6E7D8" stroke="#D6B89C"/>
+  <text x="116" y="278" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">scripts/run_single_gpu_stable.sh</text>
+  <rect x="92" y="340" width="464" height="64" rx="16" fill="#FDF7EF" stroke="#D7CFC2"/>
+  <text x="116" y="380" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">main.py -&gt; argparse</text>
+  <rect x="92" y="442" width="464" height="64" rx="16" fill="#FDF7EF" stroke="#D7CFC2"/>
+  <text x="116" y="482" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">MLLMSAMPipeline.run(image, text, max_iter)</text>
+  <rect x="92" y="544" width="464" height="72" rx="16" fill="#F6E7D8" stroke="#D6B89C"/>
+  <text x="116" y="580" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">输出 final_result / final_mask / iter*_check</text>
+  <text x="116" y="606" fill="#6A5E51" font-size="16" font-family="Arial, PingFang SC, sans-serif">更偏“脚本 + 人工观察结果”的用法</text>
+
+  <path d="M324 302V338" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M324 404V440" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M324 506V542" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="696" y="160" width="520" height="490" rx="26" fill="#FFFDF8" stroke="#D7CFC2" stroke-width="2"/>
+  <text x="724" y="202" fill="#8E4B2C" font-size="26" font-family="Arial, PingFang SC, sans-serif" font-weight="700">Web 路径</text>
+
+  <rect x="724" y="238" width="464" height="64" rx="16" fill="#F6E7D8" stroke="#D6B89C"/>
+  <text x="748" y="278" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">uvicorn server.app:app</text>
+  <rect x="724" y="340" width="464" height="64" rx="16" fill="#FDF7EF" stroke="#D7CFC2"/>
+  <text x="748" y="380" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">FastAPI lifespan -&gt; JobManager.start()</text>
+  <rect x="724" y="442" width="464" height="64" rx="16" fill="#FDF7EF" stroke="#D7CFC2"/>
+  <text x="748" y="482" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">JobManager queue -&gt; pipeline.run()</text>
+  <rect x="724" y="544" width="464" height="72" rx="16" fill="#F6E7D8" stroke="#D6B89C"/>
+  <text x="748" y="580" fill="#54382A" font-size="20" font-family="Arial, PingFang SC, sans-serif">标准化 result.png / mask.png / mask.npy</text>
+  <text x="748" y="606" fill="#6A5E51" font-size="16" font-family="Arial, PingFang SC, sans-serif">再通过 REST + WS 给前端消费</text>
+
+  <path d="M956 302V338" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M956 404V440" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+  <path d="M956 506V542" stroke="#8E4B2C" stroke-width="4" stroke-linecap="round"/>
+</svg>

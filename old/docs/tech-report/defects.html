@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M-SAgent 缺陷诊断</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="masthead">
+        <div class="brand-row">
+          <div>
+            <p class="brand-eyebrow">Defect Map</p>
+            <h1 class="brand-title">缺陷诊断：为什么现在效果会很难看</h1>
+            <p class="brand-subtitle">
+              这一页只做静态诊断，不装作已经实跑验证。每个缺陷都按同一模板展开：现象、代码证据、影响、优先级、是否需要后续运行验证。
+            </p>
+          </div>
+        </div>
+        <nav class="nav-links" aria-label="主导航">
+          <a href="./index.html">首页</a>
+          <a href="./architecture.html">架构解析</a>
+          <a href="./defects.html" aria-current="page">缺陷诊断</a>
+          <a href="./roadmap.html">整改路线</a>
+        </nav>
+      </header>
+
+      <main class="content-grid">
+        <section class="card">
+          <section class="page-section">
+            <span class="section-kicker">阅读提示</span>
+            <h2>先看标签，再看细节</h2>
+            <p class="lede">
+              你可以用下面的标签只看“事实”“推断”“风险”或“建议”相关内容。缺陷条目本身也会在标题处标注重点类型。
+            </p>
+            <div class="chip-row">
+              <button class="chip active" type="button" data-filter="all">全部</button>
+              <button class="chip" type="button" data-filter="fact">事实</button>
+              <button class="chip" type="button" data-filter="inference">静态推断</button>
+              <button class="chip" type="button" data-filter="risk">风险</button>
+              <button class="chip" type="button" data-filter="advice">建议</button>
+            </div>
+            <div class="figure-card">
+              <button
+                type="button"
+                data-zoom-src="./assets/defect-map.svg"
+                data-zoom-alt="缺陷分类图"
+                data-zoom-caption="缺陷分类图：从效果问题到维护和体验问题的层层传导。"
+              >
+                <img src="./assets/defect-map.svg" alt="缺陷分类图" />
+              </button>
+              <div class="figure-caption">
+                图 4. 缺陷分类图。建议先看效果链，再看维护链。
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" id="effect-defects">
+            <span class="section-kicker">效果问题</span>
+            <h2>这一组最接近“为什么分割结果烂”</h2>
+            <div class="defect-grid">
+              <article class="defect-card" data-tags="fact inference risk advice">
+                <div class="badge-row">
+                  <span class="badge badge-risk">效果风险</span>
+                  <span class="badge badge-fact">代码可证事实</span>
+                </div>
+                <h3>缺陷 1：工具选择与回退链过长，失败时容易退化成低价值路径</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  <a href="file:///Users/unf01d/teacher/M-SAgent/pipeline.py">pipeline.py</a> 会按 Qwen 输出在
+                  <code>object_locator</code>、<code>concept_generator</code>、
+                  <code>image_enhancer</code>、<code>report_no_mask</code> 之间分派；如果解析不到合法工具，还会落到“未知动作”分支，直接走
+                  <code>SAMProcessor.segment_with_text()</code> 兜底。与此同时，
+                  <a href="file:///Users/unf01d/teacher/M-SAgent/mllm_processor.py">mllm_processor.py</a> 解析失败时默认回退成
+                  <code>concept_generator</code>。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 出错时不是一次明确失败，而是可能多次退化到并不适合当前场景的工具，造成“看起来系统还在努力，其实越跑越偏”。</li>
+                  <li><strong>影响范围：</strong> 工具选择、失败恢复、结果可解释性。</li>
+                  <li><strong>修复优先级：</strong> P1。</li>
+                  <li><strong>是否需要运行验证：</strong> 需要。静态上能确认链路复杂，具体多大程度伤害精度要靠样例验证。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p1">跳到 P1：显式化工具回退策略</a></li>
+                </ul>
+              </article>
+
+              <article class="defect-card" data-tags="fact risk advice">
+                <div class="badge-row">
+                  <span class="badge badge-risk">效果风险</span>
+                  <span class="badge badge-fact">代码可证事实</span>
+                </div>
+                <h3>缺陷 2：定位后端“名义可替换，实际不对称”</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  <a href="file:///Users/unf01d/teacher/M-SAgent/tools/object_locator.py">tools/object_locator.py</a>
+                  里 embedded GridGround 初始化失败后，只有在显式注入非空
+                  <code>train_adapter_client</code> 时才会自动切到 HTTP。默认 pipeline
+                  里只是 <code>ObjectLocator(self.mllm)</code>，所以常见情况是 embedded 不可用时落到 MLLM 网格回退，而不是自动走 TrainAdapter。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 定位失败时，回退质量差异很大，但上层看起来都叫“定位工具”，容易误判问题根源。</li>
+                  <li><strong>影响范围：</strong> 点提示质量、目标定位一致性、部署行为可预测性。</li>
+                  <li><strong>修复优先级：</strong> P1。</li>
+                  <li><strong>是否需要运行验证：</strong> 需要。静态上能确认逻辑不对称，具体对精度伤害大小要实跑比较。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p1">跳到 P1：重构定位后端抽象</a></li>
+                </ul>
+              </article>
+
+              <article class="defect-card" data-tags="fact risk">
+                <div class="badge-row">
+                  <span class="badge badge-fact">代码可证事实</span>
+                  <span class="badge badge-risk">维护风险</span>
+                </div>
+                <h3>缺陷 3：pipeline 里有几处状态字段名义存在、实际几乎不演化</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  <code>grid_info</code> 只初始化和传参，没看到对
+                  <code>self.state["grid_info"]</code> 的回写；<code>current_text</code> 只在开始时赋值；
+                  <code>results</code> 初始化后基本未被使用。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 这类字段本身未必直接损伤精度，但会让人误以为系统有更丰富的状态更新逻辑，增加调参和 debug 时的误判成本。</li>
+                  <li><strong>影响范围：</strong> 理解成本、调试路径、后续重构难度。</li>
+                  <li><strong>修复优先级：</strong> P0。</li>
+                  <li><strong>是否需要运行验证：</strong> 不需要。静态代码已经足够确认其活跃度很低。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p0">跳到 P0：收敛闲置状态</a></li>
+                </ul>
+              </article>
+
+              <article class="defect-card" data-tags="fact inference advice">
+                <div class="badge-row">
+                  <span class="badge badge-fact">代码可证事实</span>
+                  <span class="badge badge-inference">静态推断</span>
+                </div>
+                <h3>缺陷 4：结果评估策略可能过于保守，且“失败原因”信息压缩得太少</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  评估阶段只要求 MLLM 给出 <code>Accept/Reject</code> 和被拒序号，
+                  没有结构化的失败原因字段。Reject 时如果没给出索引，还会默认拒绝最新候选。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 如果系统只知道“被拒绝了”，却不知道是“目标错了、只分到一半、边界断裂、还是多个目标混在一起”，下一轮工具选择就很难精准纠错。</li>
+                  <li><strong>影响范围：</strong> 迭代质量、错误恢复能力、日志可解释性。</li>
+                  <li><strong>修复优先级：</strong> P2。</li>
+                  <li><strong>是否需要运行验证：</strong> 需要。这里的伤害大小要靠实际失败样例才能量化。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p2">跳到 P2：评估策略重构</a></li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <section class="page-section" id="stability-defects">
+            <span class="section-kicker">稳定性与维护性</span>
+            <h2>这组问题不会直接决定精度，但会拖累整个项目</h2>
+            <div class="defect-grid">
+              <article class="defect-card" data-tags="fact risk advice">
+                <div class="badge-row">
+                  <span class="badge badge-fact">代码可证事实</span>
+                  <span class="badge badge-risk">配置风险</span>
+                </div>
+                <h3>缺陷 5：文档、默认值和实现存在轻微漂移</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  <code>Config.EXAMPLES_DIR</code> 默认指向 <code>examples/</code>，
+                  但仓库目录和 README 使用的是 <code>example/</code>；<code>main.py</code> 的
+                  <code>--output_dir</code> help 还是旧路径表述。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 它不会直接降低模型精度，但会提高误配置概率，让“环境没配对”伪装成“模型效果差”。</li>
+                  <li><strong>影响范围：</strong> 上手成本、部署稳定性、排障效率。</li>
+                  <li><strong>修复优先级：</strong> P0。</li>
+                  <li><strong>是否需要运行验证：</strong> 不需要。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p0">跳到 P0：统一配置与文档漂移</a></li>
+                </ul>
+              </article>
+
+              <article class="defect-card" data-tags="fact risk">
+                <div class="badge-row">
+                  <span class="badge badge-fact">代码可证事实</span>
+                  <span class="badge badge-risk">协议风险</span>
+                </div>
+                <h3>缺陷 6：前后端双通道同步依赖快照重建，缺少更精细的去重说明</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  前端在任务运行时同时开 WebSocket 和 6 秒轮询；store 的
+                  <code>hydrateJobStatus()</code> 会在拿到快照时重放整串事件来重建
+                  <code>iterations</code>。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 它主要影响“你怎么看到结果”，不是“模型怎么分割”；但如果状态展示不稳，排查真实缺陷会更困难。</li>
+                  <li><strong>影响范围：</strong> UI 一致性、调试体验、日志可信度。</li>
+                  <li><strong>修复优先级：</strong> P1。</li>
+                  <li><strong>是否需要运行验证：</strong> 可选。静态上已能确认机制，是否会造成可见重复事件需浏览器侧验证。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p1">跳到 P1：补前后端事件说明</a></li>
+                </ul>
+              </article>
+
+              <article class="defect-card" data-tags="fact advice">
+                <div class="badge-row">
+                  <span class="badge badge-fact">代码可证事实</span>
+                  <span class="badge badge-advice">建议</span>
+                </div>
+                <h3>缺陷 7：可测试性信号偏弱，仓库里几乎看不到直接的测试入口</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  根目录没有明显的 <code>tests/</code>、<code>pytest</code> 或单元测试组织痕迹。
+                  当前验证方式更像脚本启动 + 人工观察结果。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 一旦开始修算法和状态流，没有回归测试很难知道是“真的变好”还是“只是换了一种坏法”。</li>
+                  <li><strong>影响范围：</strong> 修改信心、回归验证、长期维护。</li>
+                  <li><strong>修复优先级：</strong> P1。</li>
+                  <li><strong>是否需要运行验证：</strong> 不需要确认其缺失，但后续补测试本身需要执行验证。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p1">跳到 P1：让后续重构可回归验证</a></li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <section class="page-section" id="product-defects">
+            <span class="section-kicker">产品体验</span>
+            <h2>这组问题会影响“用起来像不像一个成熟系统”</h2>
+            <div class="defect-grid">
+              <article class="defect-card" data-tags="fact inference advice">
+                <div class="badge-row">
+                  <span class="badge badge-inference">静态推断</span>
+                  <span class="badge badge-advice">建议</span>
+                </div>
+                <h3>缺陷 8：用户看到的是结果和轮次，但不容易理解“为什么系统这么选”</h3>
+                <p>
+                  <strong>代码证据：</strong>
+                  前端会展示工具名、分数、判定和日志，但缺少更结构化的“本轮选择原因”“失败原因摘要”“下一轮改了什么”的解释层。
+                </p>
+                <ul class="meta-list">
+                  <li><strong>为什么可能导致效果差：</strong> 不会直接影响模型输出，但会严重影响你定位缺陷的速度，尤其是在模型策略错误时。</li>
+                  <li><strong>影响范围：</strong> 演示效果、开发体验、问题定位效率。</li>
+                  <li><strong>修复优先级：</strong> P1。</li>
+                  <li><strong>是否需要运行验证：</strong> 可选。静态上已能判断缺解释层，具体是否足够影响使用可后续演示验证。</li>
+                  <li><strong>对应整改：</strong> <a href="./roadmap.html#p1">跳到 P1：补说明层和协议说明</a></li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="sidebar-card">
+          <h2 class="section-title">页内导航</h2>
+          <ol class="toc">
+            <li><a href="#effect-defects">效果问题</a></li>
+            <li><a href="#stability-defects">稳定性与维护性</a></li>
+            <li><a href="#product-defects">产品体验</a></li>
+          </ol>
+          <h2 class="section-title" style="margin-top: 24px;">跳转整改</h2>
+          <ul class="priority-list">
+            <li><a href="./roadmap.html#p0">P0：先改低风险高收益项</a></li>
+            <li><a href="./roadmap.html#p1">P1：再重构关键边界</a></li>
+            <li><a href="./roadmap.html#p2">P2：最后做需实跑验证的策略优化</a></li>
+          </ul>
+        </aside>
+      </main>
+
+      <p class="footer-note">
+        如果你想直接看“怎么改”，下一页建议阅读：<a href="./roadmap.html">整改路线</a>
+      </p>
+    </div>
+
+    <div class="lightbox" aria-hidden="true" data-lightbox>
+      <div class="lightbox-inner">
+        <div class="lightbox-toolbar">
+          <strong data-lightbox-caption></strong>
+          <button type="button" data-lightbox-close>关闭</button>
+        </div>
+        <img data-lightbox-image alt="" />
+      </div>
+    </div>
+    <script src="./script.js"></script>
+  </body>
+</html>

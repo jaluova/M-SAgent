@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M-SAgent 架构解析</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="masthead">
+        <div class="brand-row">
+          <div>
+            <p class="brand-eyebrow">Architecture</p>
+            <h1 class="brand-title">架构解析：这个项目到底怎么串起来的</h1>
+            <p class="brand-subtitle">
+              这页从“小白视角”解释系统边界、CLI 与 Web 两条主链路、核心模块关系、状态流和资源生命周期。
+            </p>
+          </div>
+        </div>
+        <nav class="nav-links" aria-label="主导航">
+          <a href="./index.html">首页</a>
+          <a href="./architecture.html" aria-current="page">架构解析</a>
+          <a href="./defects.html">缺陷诊断</a>
+          <a href="./roadmap.html">整改路线</a>
+        </nav>
+      </header>
+
+      <main class="content-grid">
+        <section class="card">
+          <section class="page-section" id="big-picture">
+            <span class="section-kicker">总体图</span>
+            <h2>先建立一个整体心智模型</h2>
+            <p class="lede">
+              这个仓库不是一个“单模型直出结果”的项目，而是一个多工具协作的推理系统。你可以把它理解成：
+              <strong>Qwen 负责想办法，SAM3 负责真正画 mask，定位模块负责帮它找到空间线索，Web 和前端只是把这条链路包装成任务系统。</strong>
+            </p>
+            <div class="figure-card">
+              <button
+                type="button"
+                data-zoom-src="./assets/architecture-overview.svg"
+                data-zoom-alt="总体架构图"
+                data-zoom-caption="总体架构图：入口、共享核心管线、后端服务和前端展示。"
+              >
+                <img src="./assets/architecture-overview.svg" alt="总体架构图" />
+              </button>
+              <div class="figure-caption">
+                图 2. 项目总体架构。共享核心是 <code>MLLMSAMPipeline</code>。
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" id="cli-web">
+            <span class="section-kicker">两条主链路</span>
+            <h2>CLI 和 Web 并不是两套不同系统</h2>
+            <div class="figure-card">
+              <button
+                type="button"
+                data-zoom-src="./assets/cli-web-flow.svg"
+                data-zoom-alt="CLI 与 Web 调用链对照图"
+                data-zoom-caption="CLI 与 Web 的对照：入口不同，但都最终进入 MLLMSAMPipeline。"
+              >
+                <img src="./assets/cli-web-flow.svg" alt="CLI 与 Web 调用链对照图" />
+              </button>
+              <div class="figure-caption">
+                图 3. CLI 与 Web 调用链对照。
+              </div>
+            </div>
+
+            <details open>
+              <summary>CLI 链路</summary>
+              <div>
+                <p>
+                  启动器通常是 <a href="file:///Users/unf01d/teacher/M-SAgent/scripts/run_single_gpu_stable.sh">scripts/run_single_gpu_stable.sh</a>，
+                  它先检查 Python、SAM3、显存和配置，再执行 <a href="file:///Users/unf01d/teacher/M-SAgent/main.py">main.py</a>。
+                  <code>main()</code> 解析 <code>--image</code>、<code>--text</code>、<code>--max_iter</code>
+                  等参数后，直接实例化 <code>MLLMSAMPipeline</code> 并调用 <code>run()</code>。
+                </p>
+              </div>
+            </details>
+            <details open>
+              <summary>Web 链路</summary>
+              <div>
+                <p>
+                  Web 入口是 <a href="file:///Users/unf01d/teacher/M-SAgent/server/app.py">server/app.py</a> 被
+                  <code>uvicorn server.app:app</code> 启动。FastAPI 在生命周期里创建
+                  <code>JobManager</code>，后者接收上传任务、放进队列，然后照样调用
+                  <code>MLLMSAMPipeline.run()</code>。
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section class="page-section" id="components">
+            <span class="section-kicker">组件职责</span>
+            <h2>每个模块到底负责什么</h2>
+            <div class="summary-grid">
+              <article class="mini-card">
+                <h3>MLLMProcessor</h3>
+                <p>加载 Qwen2.5-VL，负责“这一轮该调用哪个工具”和“当前 mask 能不能接受”两类决策。</p>
+              </article>
+              <article class="mini-card">
+                <h3>SAMProcessor</h3>
+                <p>负责真正的分割执行，支持文本提示分割和点提示分割，是最终 mask 的直接来源。</p>
+              </article>
+              <article class="mini-card">
+                <h3>ObjectLocator</h3>
+                <p>负责把文本查询变成空间点位，来源可以是 embedded GridGround、HTTP TrainAdapter，或者 MLLM 的网格回退提示。</p>
+              </article>
+              <article class="mini-card">
+                <h3>ConceptGenerator</h3>
+                <p>当原始 query 太模糊时，它会尝试多组概念改写，再逐个交给 SAM 做文本提示分割。</p>
+              </article>
+              <article class="mini-card">
+                <h3>ImageEnhancer</h3>
+                <p>当目标太小、太远、太密时，它会先裁剪并放大局部，再交给 SAM 分割并把 mask 还原回原图。</p>
+              </article>
+              <article class="mini-card">
+                <h3>JobManager + 前端</h3>
+                <p>负责任务排队、事件分发、结果标准化和 UI 消费，不直接参与模型推理决策。</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="page-section" id="iteration">
+            <span class="section-kicker">多轮推理</span>
+            <h2>为什么这个项目要一轮一轮地跑</h2>
+            <p>
+              核心原因是作者不信任“一次分割就一定对”。所以 pipeline
+              不是“输入文本就直接出 mask”，而是每轮先分析，再执行，再生成检查图，再让 MLLM
+              二次评估。如果这一轮被判成 <code>Reject</code>，系统不会立刻认输，而是保留仍有价值的候选，
+              换一种工具或提示继续跑。
+            </p>
+            <div class="callout">
+              <strong>这一点很关键：</strong>
+              项目效果差，不一定是某个模型单独不行，也可能是“工具选错了、评估太保守、回退路径太差”导致的系统级问题。
+            </div>
+          </section>
+
+          <section class="page-section" id="state-flow">
+            <span class="section-kicker">状态流</span>
+            <h2>系统内部主要记住哪些状态</h2>
+            <div class="text-columns">
+              <p>
+                在 pipeline 内部，真正跨轮演化的核心状态是：
+                <code>iteration</code>、<code>accepted_masks</code>、<code>current_image</code>、
+                <code>final_image</code> 和 <code>tool_history</code>。它们分别表示当前轮次、已经保留下来的候选 mask、
+                下一轮给 MLLM 看的上下文图、当前最像“最终答案”的可视化图、以及前几轮尝试过什么。
+              </p>
+              <p>
+                另外还有一些“看上去很重要、但静态阅读里几乎不演化”的字段，比如
+                <code>grid_info</code>、<code>current_text</code>、<code>results</code>。这些字段会增加读代码时的心理负担，
+                因为你会下意识觉得它们承担了很多职责，但实际上在当前实现里并不活跃。
+              </p>
+              <p>
+                Web 端的状态则被拆成三层：原始事件 <code>events</code>、按轮聚合的
+                <code>iterations</code>、以及最终结果 <code>result</code>。这是一种比直接把所有事情都塞进一个 store 更清晰的做法。
+              </p>
+            </div>
+          </section>
+
+          <section class="page-section" id="resources">
+            <span class="section-kicker">资源生命周期</span>
+            <h2>模型和资源是怎么被持有的</h2>
+            <details open>
+              <summary>Qwen 的生命周期</summary>
+              <div>
+                <p>
+                  <code>MLLMProcessor</code> 初始化时加载 Qwen2.5-VL，并构造
+                  <code>SharedQwenBackbone</code>，供 embedded GridGround 复用视觉/文本编码能力。
+                </p>
+              </div>
+            </details>
+            <details open>
+              <summary>SAM3 的生命周期</summary>
+              <div>
+                <p>
+                  <code>SAMProcessor</code> 也是对象级持有，但推理时会临时上 GPU、结束后回 CPU。
+                  这说明仓库在主动做显存折中，而不是把所有模型都一直钉在 GPU 上。
+                </p>
+              </div>
+            </details>
+            <details open>
+              <summary>Web 任务资源</summary>
+              <div>
+                <p>
+                  <code>JobManager</code> 会缓存 pipeline 和 SAM 实例，避免每个任务都从头重建。
+                  代价是后端目前更像“单进程、单队列、共享模型对象”的服务。
+                </p>
+              </div>
+            </details>
+          </section>
+        </section>
+
+        <aside class="sidebar-card">
+          <h2 class="section-title">页内导航</h2>
+          <ol class="toc">
+            <li><a href="#big-picture">总体图</a></li>
+            <li><a href="#cli-web">CLI / Web 链路</a></li>
+            <li><a href="#components">组件职责</a></li>
+            <li><a href="#iteration">多轮推理</a></li>
+            <li><a href="#state-flow">状态流</a></li>
+            <li><a href="#resources">资源生命周期</a></li>
+          </ol>
+
+          <h2 class="section-title" style="margin-top: 24px;">代码证据</h2>
+          <ul class="priority-list">
+            <li><a href="file:///Users/unf01d/teacher/M-SAgent/pipeline.py">pipeline.py</a></li>
+            <li><a href="file:///Users/unf01d/teacher/M-SAgent/mllm_processor.py">mllm_processor.py</a></li>
+            <li><a href="file:///Users/unf01d/teacher/M-SAgent/sam_processor.py">sam_processor.py</a></li>
+            <li><a href="file:///Users/unf01d/teacher/M-SAgent/server/job_manager.py">server/job_manager.py</a></li>
+            <li><a href="file:///Users/unf01d/teacher/M-SAgent/frontend/src/stores/job-store.ts">job-store.ts</a></li>
+          </ul>
+        </aside>
+      </main>
+
+      <p class="footer-note">
+        下一页建议阅读：<a href="./defects.html">缺陷诊断</a>
+      </p>
+    </div>
+
+    <div class="lightbox" aria-hidden="true" data-lightbox>
+      <div class="lightbox-inner">
+        <div class="lightbox-toolbar">
+          <strong data-lightbox-caption></strong>
+          <button type="button" data-lightbox-close>关闭</button>
+        </div>
+        <img data-lightbox-image alt="" />
+      </div>
+    </div>
+    <script src="./script.js"></script>
+  </body>
+</html>
