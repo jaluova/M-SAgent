@@ -1,0 +1,38 @@
+{
+  "artifact_id": "mask-0004",
+  "artifact_type": "mask",
+  "payload_type": "MockMask",
+  "saved_at": "2026-04-13T14:20:00.919487",
+  "payload": {
+    "__dataclass__": "MockMask",
+    "fields": {
+      "mask_id": "cli-task-0e178635-mask-1",
+      "width": 10,
+      "height": 10,
+      "active_box": {
+        "__dataclass__": "NormalizedBox",
+        "fields": {
+          "x1": 0.2,
+          "y1": 0.18,
+          "x2": 0.72,
+          "y2": 0.84
+        }
+      },
+      "active_points": [
+        {
+          "__tuple__": [
+            4,
+            4
+          ]
+        },
+        {
+          "__tuple__": [
+            5,
+            6
+          ]
+        }
+      ],
+      "label": "mock_mask"
+    }
+  }
+}

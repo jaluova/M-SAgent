@@ -217,6 +217,7 @@ class Orchestrator:
                 attempt_index=task.runtime.attempt_index,
                 upstream_refs=self._collect_attempt_refs(attempt_record),
                 understanding=understanding,
+                image_ref=task.request.image_ref,
                 preferred_route=task.runtime.active_route,
             )
         )

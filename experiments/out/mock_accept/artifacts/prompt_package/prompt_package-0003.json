@@ -1,0 +1,142 @@
+{
+  "artifact_id": "prompt_package-0003",
+  "artifact_type": "prompt_package",
+  "payload_type": "PromptPackage",
+  "saved_at": "2026-04-13T14:18:26.356625",
+  "payload": {
+    "__dataclass__": "PromptPackage",
+    "fields": {
+      "package_id": "cli-task-2132740e-prompt-1",
+      "package_version": "v1",
+      "text_prompts": {
+        "__dataclass__": "PromptTextBundle",
+        "fields": {
+          "normalized_text": "the red cup",
+          "raw_text": "the red cup",
+          "rewritten_text": null,
+          "focus_terms": [
+            "the red cup"
+          ]
+        }
+      },
+      "spatial_prompts": {
+        "__dataclass__": "SpatialPromptBundle",
+        "fields": {
+          "positive_points": [
+            {
+              "__dataclass__": "PointPrompt",
+              "fields": {
+                "x": 0.42,
+                "y": 0.45,
+                "confidence": 0.95,
+                "source": "proposal.positive_point_hint",
+                "note": "target center"
+              }
+            },
+            {
+              "__dataclass__": "PointPrompt",
+              "fields": {
+                "x": 0.55,
+                "y": 0.62,
+                "confidence": 0.87,
+                "source": "proposal.positive_point_hint",
+                "note": "target support"
+              }
+            }
+          ],
+          "negative_points": [
+            {
+              "__dataclass__": "PointPrompt",
+              "fields": {
+                "x": 0.1,
+                "y": 0.12,
+                "confidence": 0.72,
+                "source": "proposal.negative_point_hint",
+                "note": "background corner"
+              }
+            },
+            {
+              "__dataclass__": "PointPrompt",
+              "fields": {
+                "x": 0.86,
+                "y": 0.22,
+                "confidence": 0.7,
+                "source": "proposal.negative_point_hint",
+                "note": "distractor region"
+              }
+            }
+          ],
+          "boxes": [
+            {
+              "__dataclass__": "BoxPrompt",
+              "fields": {
+                "x1": 0.2,
+                "y1": 0.18,
+                "x2": 0.72,
+                "y2": 0.84,
+                "confidence": 0.91,
+                "source": "proposal.primary_candidate",
+                "note": "primary proposal box"
+              }
+            }
+          ],
+          "coarse_region_ref": null,
+          "coarse_mask_ref": null
+        }
+      },
+      "metadata": {
+        "__dataclass__": "PromptMetadata",
+        "fields": {
+          "produced_from_route": "locate",
+          "source_refs": [
+            {
+              "__dataclass__": "ArtifactRef",
+              "fields": {
+                "artifact_id": "query_understanding_result-0001",
+                "artifact_type": "query_understanding_result",
+                "attempt_index": 1,
+                "summary": "Target inferred from query: the red cup"
+              }
+            },
+            {
+              "__dataclass__": "ArtifactRef",
+              "fields": {
+                "artifact_id": "proposal_result-0002",
+                "artifact_type": "proposal_result",
+                "attempt_index": 1,
+                "summary": "Mock locator produced a single ready candidate."
+              }
+            }
+          ],
+          "confidence": 0.91,
+          "strategy_tags": [
+            "normalized_text",
+            "box",
+            "positive_points",
+            "negative_points"
+          ],
+          "notes": [
+            "primary_candidate_id=locate-candidate-1",
+            "prefer_box_plus_points",
+            "need_negative_points"
+          ]
+        }
+      },
+      "execution_hints": {
+        "__dataclass__": "ExecutionHints",
+        "fields": {
+          "multimask": false,
+          "crop_to_box": true,
+          "preferred_prompt_order": [
+            "box",
+            "positive_points",
+            "negative_points",
+            "text"
+          ],
+          "return_top_k": 1,
+          "fallback_to_text_only": false
+        }
+      }
+    }
+  }
+}

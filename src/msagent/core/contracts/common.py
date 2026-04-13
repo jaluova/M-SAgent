@@ -36,6 +36,20 @@ class ArtifactKind(StrEnum):
 
 
 @dataclass(slots=True)
+class ImageRef:
+    """输入图像的统一引用。"""
+
+    uri: str
+    # 图像定位方式，可以是本地路径、URI 或对象存储地址。
+
+    image_id: str | None = None
+    # 业务侧图像 ID，方便上层系统关联。
+
+    sha256: str | None = None
+    # 图像内容摘要，用于去重、缓存或校验。
+
+
+@dataclass(slots=True)
 class ArtifactRef:
     """任务账本中可被追踪的产物引用。"""
 

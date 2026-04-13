@@ -10,7 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from msagent.core.contracts.adapter_requests import LocateAdapterRequest
-from msagent.core.contracts.common import ArtifactKind, BaseModuleInput, BaseModuleOutput
+from msagent.core.contracts.common import (
+    ArtifactKind,
+    BaseModuleInput,
+    BaseModuleOutput,
+    DiagnosticMessage,
+    ImageRef,
+)
 from msagent.core.contracts.common import ModuleStatus
 from msagent.core.contracts.types import (
     ProposalResult,
@@ -30,6 +36,9 @@ class ProposalEngineModuleInput(BaseModuleInput):
 
     preferred_route: ProposalRoute
     # orchestrator 当前希望优先走的 route。
+
+    image_ref: ImageRef | None = None
+    # 供 locate route 使用的图像引用；优先保持结构化而不是仅传裸 URI。
 
 
 class ProposalRouteHandler:
@@ -75,6 +84,8 @@ class LocateProposalRouteHandler(ProposalRouteHandler):
             LocateAdapterRequest(
                 task_id=module_input.task_id,
                 understanding=module_input.understanding,
+                image_ref=module_input.image_ref,
+                image_uri=module_input.image_ref.uri if module_input.image_ref else None,
                 trace_context=module_input.trace_context,
                 options=dict(module_input.module_options),
             )
@@ -139,10 +150,26 @@ class DefaultProposalEngineModule(ProposalEngineModule):
             module_status = ModuleStatus.EMPTY
         else:
             module_status = ModuleStatus.FAILED
+        diagnostics = [
+            DiagnosticMessage(
+                level=self._diagnostic_level_for_status(payload.status),
+                message=message,
+                code="proposal_payload_diagnostic",
+            )
+            for message in payload.diagnostics
+        ]
         return BaseModuleOutput(
             module_name=self.module_name,
             status=module_status,
             primary_payload=payload,
             artifact_ref=artifact_ref,
             consumed_refs=list(module_input.upstream_refs),
+            diagnostics=diagnostics,
         )
+
+    def _diagnostic_level_for_status(self, status: ProposalStatus) -> str:
+        if status is ProposalStatus.FAILED:
+            return "error"
+        if status is ProposalStatus.EMPTY:
+            return "warning"
+        return "info"
