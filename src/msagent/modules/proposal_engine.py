@@ -9,19 +9,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from msagent.core.contracts.adapter_requests import LocateAdapterRequest
 from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
-from msagent.core.contracts.types import ProposalResult, ProposalRoute, QueryUnderstandingResult
-from msagent.infra.adapters import ArtifactStore, LocatorAdapter
+from msagent.core.contracts.common import ModuleStatus
+from msagent.core.contracts.types import (
+    ProposalResult,
+    ProposalRoute,
+    ProposalStatus,
+    QueryUnderstandingResult,
+)
+from msagent.infra.adapters import ArtifactKind, ArtifactStore, LocatorAdapter
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class ProposalEngineModuleInput(BaseModuleInput):
     """Proposal Engine 模块输入 DTO。"""
 
-    understanding: QueryUnderstandingResult | None = None
+    understanding: QueryUnderstandingResult
     # 本轮 query understanding 的权威实体对象。
 
-    preferred_route: ProposalRoute = ProposalRoute.LOCATE
+    preferred_route: ProposalRoute
     # orchestrator 当前希望优先走的 route。
 
 
@@ -64,7 +71,14 @@ class LocateProposalRouteHandler(ProposalRouteHandler):
 
     def build_proposal(self, module_input: ProposalEngineModuleInput) -> ProposalResult:
         """基于定位后端构建 locate proposal。"""
-        raise NotImplementedError
+        return self.locator_adapter.locate(
+            LocateAdapterRequest(
+                task_id=module_input.task_id,
+                understanding=module_input.understanding,
+                trace_context=module_input.trace_context,
+                options=dict(module_input.module_options),
+            )
+        )
 
 
 @dataclass(slots=True)
@@ -108,4 +122,27 @@ class DefaultProposalEngineModule(ProposalEngineModule):
         self, module_input: ProposalEngineModuleInput
     ) -> BaseModuleOutput[ProposalResult]:
         """根据 preferred_route 派发到对应 route handler。"""
-        raise NotImplementedError
+        handler = self.route_handlers.get(module_input.preferred_route)
+        if handler is None:
+            raise ValueError(f"Unsupported proposal route: {module_input.preferred_route}")
+
+        payload = handler.build_proposal(module_input)
+        artifact_ref = self.artifact_store.save_artifact(
+            ArtifactKind.PROPOSAL_RESULT,
+            payload,
+        )
+        artifact_ref.attempt_index = module_input.attempt_index
+        artifact_ref.summary = payload.proposal_summary
+        if payload.status is ProposalStatus.READY:
+            module_status = ModuleStatus.SUCCESS
+        elif payload.status is ProposalStatus.EMPTY:
+            module_status = ModuleStatus.EMPTY
+        else:
+            module_status = ModuleStatus.FAILED
+        return BaseModuleOutput(
+            module_name=self.module_name,
+            status=module_status,
+            primary_payload=payload,
+            artifact_ref=artifact_ref,
+            consumed_refs=list(module_input.upstream_refs),
+        )

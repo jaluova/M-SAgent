@@ -13,8 +13,13 @@ CLI 层的职责仅限于：
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
+from msagent.core.task.enums import TaskSource, TaskStage, TaskStatus
 from msagent.core.task.models import RunTask
+from msagent.core.task.models import ImageRef, RunTaskIdentity, RunTaskRequest, RunTaskRuntime
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestrationResult
 
 
@@ -44,9 +49,28 @@ class CLIService:
 
     def build_task(self, request: CLIRequest) -> RunTask:
         """把 CLI 请求转换为 RunTask。"""
-        raise NotImplementedError
+        now = datetime.now()
+        task_id = f"cli-task-{uuid4().hex[:8]}"
+        return RunTask(
+            identity=RunTaskIdentity(
+                task_id=task_id,
+                source=TaskSource.CLI,
+                created_at=now,
+            ),
+            request=RunTaskRequest(
+                image_ref=ImageRef(uri=str(Path(request.image_path).expanduser().resolve())),
+                raw_query=request.query_text,
+            ),
+            runtime=RunTaskRuntime(
+                stage=TaskStage.CREATED,
+                status=TaskStatus.PENDING,
+                attempt_index=0,
+                max_attempts=max(1, request.max_attempts),
+                updated_at=now,
+            ),
+        )
 
     def run(self, request: CLIRequest) -> OrchestrationResult:
         """执行单次 CLI 推理任务。"""
-        raise NotImplementedError
-
+        task = self.build_task(request)
+        return self.orchestrator.run(task)

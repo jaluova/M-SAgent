@@ -9,19 +9,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from msagent.core.contracts.adapter_requests import SegmentAdapterRequest
 from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
-from msagent.core.contracts.types import PromptPackage, SegmentationResult
-from msagent.infra.adapters import ArtifactStore, SAMAdapter
+from msagent.core.contracts.common import ModuleStatus
+from msagent.core.contracts.types import PromptPackage, SegmentationResult, SegmentationStatus
+from msagent.infra.adapters import ArtifactKind, ArtifactStore, SAMAdapter
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class SegmenterModuleInput(BaseModuleInput):
     """Segmenter 模块输入 DTO。"""
 
-    image_uri: str = ""
+    image_uri: str
     # 当前待分割图像的引用。
 
-    prompt_package: PromptPackage | None = None
+    prompt_package: PromptPackage
     # Prompt Bridge 产出的权威实体对象，是本模块的正式业务输入。
 
 
@@ -51,4 +53,42 @@ class SAMSegmenterModule(SegmenterModule):
 
     def run(self, module_input: SegmenterModuleInput) -> BaseModuleOutput[SegmentationResult]:
         """调用 SAM 后端完成一次基于 PromptPackage 的分割。"""
-        raise NotImplementedError
+        payload = self.sam_adapter.segment(
+            SegmentAdapterRequest(
+                task_id=module_input.task_id,
+                image_uri=module_input.image_uri,
+                prompt_package=module_input.prompt_package,
+                trace_context=module_input.trace_context,
+            )
+        )
+        for candidate in payload.candidates:
+            candidate.mask_ref.attempt_index = module_input.attempt_index
+        if payload.prompt_package_ref is None:
+            payload.prompt_package_ref = next(
+                (
+                    ref
+                    for ref in module_input.upstream_refs
+                    if ref.artifact_type == ArtifactKind.PROMPT_PACKAGE.value
+                ),
+                None,
+            )
+
+        artifact_ref = self.artifact_store.save_artifact(
+            ArtifactKind.SEGMENTATION_RESULT,
+            payload,
+        )
+        artifact_ref.attempt_index = module_input.attempt_index
+        artifact_ref.summary = payload.result_summary
+        if payload.status is SegmentationStatus.READY:
+            module_status = ModuleStatus.SUCCESS
+        elif payload.status is SegmentationStatus.EMPTY:
+            module_status = ModuleStatus.EMPTY
+        else:
+            module_status = ModuleStatus.FAILED
+        return BaseModuleOutput(
+            module_name=self.module_name,
+            status=module_status,
+            primary_payload=payload,
+            artifact_ref=artifact_ref,
+            consumed_refs=list(module_input.upstream_refs),
+        )

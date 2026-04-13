@@ -9,22 +9,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from msagent.core.contracts.adapter_requests import EvaluationAdapterRequest
 from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
-from msagent.core.contracts.types import EvaluationResult, QueryUnderstandingResult, SegmentationResult
-from msagent.infra.adapters import ArtifactStore, LLMAdapter
+from msagent.core.contracts.common import ModuleStatus
+from msagent.core.contracts.types import (
+    EvaluationResult,
+    PromptPackage,
+    ProposalResult,
+    QueryUnderstandingResult,
+    SegmentationResult,
+)
+from msagent.infra.adapters import ArtifactKind, ArtifactStore, LLMAdapter
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class EvaluatorModuleInput(BaseModuleInput):
     """Evaluator 模块输入 DTO。"""
 
-    raw_query: str = ""
+    raw_query: str
     # 用户原始 query，便于对齐 prompt 与结果语义。
 
     understanding: QueryUnderstandingResult | None = None
     # query understanding 的权威实体对象，可辅助解释失败原因。
 
-    segmentation: SegmentationResult | None = None
+    proposal: ProposalResult | None = None
+    # 本轮进入分割前的 proposal，可辅助分析 prompt mismatch。
+
+    prompt_package: PromptPackage
+    # 实际喂给 segmenter 的 PromptPackage，是 evaluator 判断 prompt mismatch 的关键输入。
+
+    segmentation: SegmentationResult
     # 当前要评估的权威结构化分割结果。
 
 
@@ -54,4 +68,27 @@ class LLMEvaluatorModule(EvaluatorModule):
 
     def run(self, module_input: EvaluatorModuleInput) -> BaseModuleOutput[EvaluationResult]:
         """调用评估后端并产出结构化 EvaluationResult。"""
-        raise NotImplementedError
+        payload = self.llm_adapter.run_evaluation(
+            EvaluationAdapterRequest(
+                task_id=module_input.task_id,
+                raw_query=module_input.raw_query,
+                segmentation=module_input.segmentation,
+                prompt_package=module_input.prompt_package,
+                proposal=module_input.proposal,
+                understanding=module_input.understanding,
+                trace_context=module_input.trace_context,
+            )
+        )
+        artifact_ref = self.artifact_store.save_artifact(
+            ArtifactKind.EVALUATION_RESULT,
+            payload,
+        )
+        artifact_ref.attempt_index = module_input.attempt_index
+        artifact_ref.summary = payload.summary
+        return BaseModuleOutput(
+            module_name=self.module_name,
+            status=ModuleStatus.SUCCESS,
+            primary_payload=payload,
+            artifact_ref=artifact_ref,
+            consumed_refs=list(module_input.upstream_refs),
+        )

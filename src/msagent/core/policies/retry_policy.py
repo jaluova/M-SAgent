@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from msagent.core.contracts.types import ProposalRoute
+from msagent.core.contracts.types import EvaluationVerdict, ProposalRoute
+from msagent.core.task.enums import StopReason
 from msagent.core.task.models import RunTask
 
 
@@ -44,8 +45,35 @@ class RetryPolicy:
 
     def choose_initial_route(self, task: RunTask) -> ProposalRoute:
         """根据任务状态选择初始 route。"""
-        raise NotImplementedError
+        return self.default_route
 
     def decide_retry(self, task: RunTask) -> RetryDecision:
         """根据任务当前状态和最近评估结果决定是否重试。"""
-        raise NotImplementedError
+        if not task.attempt_history:
+            return RetryDecision(
+                should_retry=False,
+                reason="No attempt has been executed yet.",
+                policy_tags=["no-attempt-history"],
+            )
+
+        latest_attempt = task.attempt_history[-1]
+        if latest_attempt.verdict is EvaluationVerdict.ACCEPT:
+            return RetryDecision(
+                should_retry=False,
+                reason="Latest evaluation accepted the result.",
+                policy_tags=["accepted"],
+            )
+
+        if len(task.attempt_history) >= task.runtime.max_attempts:
+            return RetryDecision(
+                should_retry=False,
+                reason="Maximum attempts reached.",
+                policy_tags=["max-attempt-guard", StopReason.MAX_ATTEMPTS_REACHED.value],
+            )
+
+        return RetryDecision(
+            should_retry=True,
+            next_route=latest_attempt.route,
+            reason="Retry allowed because the latest evaluation rejected the result.",
+            policy_tags=["simple-retry"],
+        )

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from msagent.core.contracts.types import (
     PromptPackage,
+    ProposalResult,
     QueryUnderstandingResult,
     SegmentationResult,
 )
@@ -54,6 +55,7 @@ class EvaluationAdapterRequest:
     task_id: str
     raw_query: str
     segmentation: SegmentationResult
+    prompt_package: PromptPackage
+    proposal: ProposalResult | None = None
     understanding: QueryUnderstandingResult | None = None
     trace_context: TraceContext | None = None
-
