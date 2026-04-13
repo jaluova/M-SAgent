@@ -24,7 +24,7 @@ from msagent.core.contracts.types import (
     SegmentationResult,
 )
 
-ArtifactPayloadT = TypeVar("ArtifactPayloadT")
+LoadedArtifactT = TypeVar("LoadedArtifactT")
 
 
 @dataclass(slots=True)
@@ -91,15 +91,15 @@ class ArtifactStore:
     root_uri: str
     # 默认产物根位置，可以是本地目录或远端存储前缀。
 
-    def save_artifact(self, artifact_type: str, payload: ArtifactPayloadT) -> ArtifactRef:
+    def save_artifact(self, artifact_type: str, payload: object) -> ArtifactRef:
         """保存结构化产物并返回其引用。"""
         raise NotImplementedError
 
     def load_artifact(
         self,
         artifact_ref: ArtifactRef,
-        expected_type: type[ArtifactPayloadT],
-    ) -> ArtifactPayloadT:
+        expected_type: type[LoadedArtifactT],
+    ) -> LoadedArtifactT:
         """根据 ArtifactRef 按声明类型加载已保存的产物。
 
         调用方必须显式给出期望类型，避免“按 ref 读回对象”时重新丢失类型边界。
