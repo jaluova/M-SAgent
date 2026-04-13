@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from msagent.core.contracts.adapter_requests import LocateAdapterRequest
-from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
+from msagent.core.contracts.common import ArtifactKind, BaseModuleInput, BaseModuleOutput
 from msagent.core.contracts.common import ModuleStatus
 from msagent.core.contracts.types import (
     ProposalResult,
@@ -18,7 +18,7 @@ from msagent.core.contracts.types import (
     ProposalStatus,
     QueryUnderstandingResult,
 )
-from msagent.infra.adapters import ArtifactKind, ArtifactStore, LocatorAdapter
+from msagent.infra.adapters import ArtifactStore, LocatorAdapter
 
 
 @dataclass(slots=True, kw_only=True)

@@ -11,13 +11,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from msagent.core.contracts.common import ArtifactRef
-from msagent.core.contracts.types import (
-    EvaluationVerdict,
-    MockMask,
-    ProposalRoute,
-    QueryUnderstandingResult,
-)
+from msagent.core.contracts.common import ArtifactKind, ArtifactRef
+from msagent.core.contracts.types import EvaluationVerdict, ProposalRoute, QueryUnderstandingResult
 from msagent.core.contracts.types import (
     ImplicitnessLevel,
     NormalizedBox,
@@ -31,13 +26,15 @@ from msagent.core.contracts.types import (
 from msagent.core.contracts.adapter_requests import EvaluationAdapterRequest
 from msagent.core.policies.retry_policy import RetryPolicy
 from msagent.core.task.enums import StopReason, TaskStage, TaskStatus
-from msagent.infra.adapters import ArtifactKind, LocatorAdapter
+from msagent.infra.adapters import LocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
 from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
+from msagent.infra.mock_artifacts import MockMask
 from msagent.modules.evaluator import LLMEvaluatorModule
 from msagent.modules.prompt_bridge import PromptBridgeModuleInput, RuleBasedPromptBridgeModule
 from msagent.modules.proposal_engine import DefaultProposalEngineModule, LocateProposalRouteHandler
 from msagent.modules.query_understanding import LLMQueryUnderstandingModule
+from msagent.modules.segmenter import SegmenterModuleInput
 from msagent.modules.segmenter import SAMSegmenterModule
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestratorDependencies
 from msagent.service.cli import CLIRequest, CLIService
@@ -205,12 +202,30 @@ class MinimalVerticalSliceTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 store.load_artifact(artifact_ref, MockMask)
             with self.assertRaises(TypeError):
-                store.save_artifact(ArtifactKind.QUERY_UNDERSTANDING_RESULT, MockMask(
-                    mask_id="m-1",
-                    width=1,
-                    height=1,
-                    active_box=NormalizedBox(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
-                ))
+                store.save_artifact(
+                    ArtifactKind.QUERY_UNDERSTANDING_RESULT,
+                    MockMask(
+                        mask_id="m-1",
+                        width=1,
+                        height=1,
+                        active_box=NormalizedBox(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+                    ),
+                )
+
+            class DerivedUnderstanding(QueryUnderstandingResult):
+                extra_field: str = "extra"
+
+            with self.assertRaises(TypeError):
+                store.save_artifact(
+                    ArtifactKind.QUERY_UNDERSTANDING_RESULT,
+                    DerivedUnderstanding(
+                        understanding_id="u-2",
+                        normalized_query="subclass query",
+                        target_summary="subclass",
+                        target_type=TargetType.OBJECT,
+                        implicitness=ImplicitnessLevel.EXPLICIT,
+                    ),
+                )
 
     def test_prompt_bridge_output(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -228,12 +243,12 @@ class MinimalVerticalSliceTests(unittest.TestCase):
                     upstream_refs=[
                         ArtifactRef(
                             artifact_id="u-1",
-                            artifact_type=ArtifactKind.QUERY_UNDERSTANDING_RESULT.value,
+                            artifact_type=ArtifactKind.QUERY_UNDERSTANDING_RESULT,
                             attempt_index=1,
                         ),
                         ArtifactRef(
                             artifact_id="p-1",
-                            artifact_type=ArtifactKind.PROPOSAL_RESULT.value,
+                            artifact_type=ArtifactKind.PROPOSAL_RESULT,
                             attempt_index=1,
                         ),
                     ],
@@ -250,6 +265,63 @@ class MinimalVerticalSliceTests(unittest.TestCase):
             self.assertEqual(len(package.metadata.source_refs), 2)
             self.assertIsNotNone(package.execution_hints)
             self.assertTrue(package.execution_hints.crop_to_box)
+
+    def test_mock_segmenter_accepts_points_only_prompt(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            store = LocalFileArtifactStore(str(tmp_path / "artifacts"))
+            segmenter = SAMSegmenterModule(
+                sam_adapter=MockSAMAdapter(
+                    backend_name="mock-sam",
+                    artifact_store=store,
+                ),
+                artifact_store=store,
+            )
+            package = RuleBasedPromptBridgeModule(artifact_store=store).run(
+                PromptBridgeModuleInput(
+                    task_id="task-points",
+                    attempt_index=1,
+                    raw_query="the red cup",
+                    understanding=make_understanding(),
+                    proposal=ProposalResult(
+                        proposal_id="points-only",
+                        route=ProposalRoute.LOCATE,
+                        status=ProposalStatus.READY,
+                        proposal_summary="points only",
+                        candidates=[
+                            ProposalCandidate(
+                                candidate_id="candidate-points",
+                                rank=1,
+                                confidence=0.9,
+                                positive_point_hints=[
+                                    PointHint(x=0.4, y=0.5, confidence=0.9, reason="center"),
+                                    PointHint(x=0.6, y=0.55, confidence=0.8, reason="support"),
+                                ],
+                            )
+                        ],
+                        primary_candidate_id="candidate-points",
+                    ),
+                )
+            ).primary_payload
+            assert package is not None
+            package.spatial_prompts.boxes = []
+
+            output = segmenter.run(
+                SegmenterModuleInput(
+                    task_id="task-points",
+                    attempt_index=1,
+                    image_uri=str(tmp_path / "input.png"),
+                    prompt_package=package,
+                )
+            )
+
+            self.assertIsNotNone(output.primary_payload)
+            result = output.primary_payload
+            assert result is not None
+            self.assertEqual(len(result.candidates), 1)
+            loaded_mask = store.load_artifact(result.candidates[0].mask_ref, MockMask)
+            self.assertAlmostEqual(loaded_mask.active_box.x1, 0.32)
+            self.assertAlmostEqual(loaded_mask.active_box.x2, 0.68)
 
     def test_retry_boundary(self) -> None:
         with TemporaryDirectory() as tmp_dir:

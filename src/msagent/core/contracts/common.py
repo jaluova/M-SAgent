@@ -24,6 +24,17 @@ class ModuleStatus(StrEnum):
     FAILED = "failed"
 
 
+class ArtifactKind(StrEnum):
+    """受控 artifact kind 注册表。"""
+
+    QUERY_UNDERSTANDING_RESULT = "query_understanding_result"
+    PROPOSAL_RESULT = "proposal_result"
+    PROMPT_PACKAGE = "prompt_package"
+    SEGMENTATION_RESULT = "segmentation_result"
+    EVALUATION_RESULT = "evaluation_result"
+    MASK = "mask"
+
+
 @dataclass(slots=True)
 class ArtifactRef:
     """任务账本中可被追踪的产物引用。"""
@@ -31,7 +42,7 @@ class ArtifactRef:
     artifact_id: str
     # 产物唯一标识，是任务内外统一引用某个中间结果的主键。
 
-    artifact_type: str
+    artifact_type: ArtifactKind
     # 产物类型，例如 "proposal_result"、"segmentation_result"。
 
     attempt_index: int | None = None

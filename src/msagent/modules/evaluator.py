@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from msagent.core.contracts.adapter_requests import EvaluationAdapterRequest
-from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
+from msagent.core.contracts.common import ArtifactKind, BaseModuleInput, BaseModuleOutput
 from msagent.core.contracts.common import ModuleStatus
 from msagent.core.contracts.types import (
     EvaluationResult,
@@ -19,7 +19,7 @@ from msagent.core.contracts.types import (
     QueryUnderstandingResult,
     SegmentationResult,
 )
-from msagent.infra.adapters import ArtifactKind, ArtifactStore, LLMAdapter
+from msagent.infra.adapters import ArtifactStore, LLMAdapter
 
 
 @dataclass(slots=True, kw_only=True)

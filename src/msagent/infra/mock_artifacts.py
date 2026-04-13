@@ -1,10 +1,10 @@
-"""定义 mask artifact 相关公共类型。"""
+"""mock vertical slice 使用的本地产物类型。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from msagent.core.contracts.types.proposal import NormalizedBox
+from msagent.core.contracts.types import NormalizedBox
 
 
 @dataclass(slots=True)

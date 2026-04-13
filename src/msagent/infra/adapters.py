@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TypeVar
 
 from msagent.core.contracts.adapter_requests import (
@@ -17,10 +16,9 @@ from msagent.core.contracts.adapter_requests import (
     QueryUnderstandingAdapterRequest,
     SegmentAdapterRequest,
 )
-from msagent.core.contracts.common import ArtifactRef
+from msagent.core.contracts.common import ArtifactKind, ArtifactRef
 from msagent.core.contracts.types import (
     EvaluationResult,
-    MockMask,
     PromptPackage,
     ProposalResult,
     QueryUnderstandingResult,
@@ -28,39 +26,6 @@ from msagent.core.contracts.types import (
 )
 
 LoadedArtifactT = TypeVar("LoadedArtifactT")
-
-
-class ArtifactKind(StrEnum):
-    """受控 artifact kind 注册表。"""
-
-    QUERY_UNDERSTANDING_RESULT = "query_understanding_result"
-    PROPOSAL_RESULT = "proposal_result"
-    PROMPT_PACKAGE = "prompt_package"
-    SEGMENTATION_RESULT = "segmentation_result"
-    EVALUATION_RESULT = "evaluation_result"
-    MOCK_MASK = "mock_mask"
-
-
-ARTIFACT_PAYLOAD_TYPES: dict[ArtifactKind, type[object]] = {
-    ArtifactKind.QUERY_UNDERSTANDING_RESULT: QueryUnderstandingResult,
-    ArtifactKind.PROPOSAL_RESULT: ProposalResult,
-    ArtifactKind.PROMPT_PACKAGE: PromptPackage,
-    ArtifactKind.SEGMENTATION_RESULT: SegmentationResult,
-    ArtifactKind.EVALUATION_RESULT: EvaluationResult,
-    ArtifactKind.MOCK_MASK: MockMask,
-}
-
-
-def get_artifact_payload_type(artifact_kind: ArtifactKind) -> type[object]:
-    """返回 artifact kind 对应的权威 payload 类型。"""
-
-    return ARTIFACT_PAYLOAD_TYPES[artifact_kind]
-
-
-def resolve_artifact_kind(artifact_type: str) -> ArtifactKind:
-    """把 artifact_type 字符串解析成受控 kind。"""
-
-    return ArtifactKind(artifact_type)
 
 
 @dataclass(slots=True)

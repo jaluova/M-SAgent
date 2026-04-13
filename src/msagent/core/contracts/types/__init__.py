@@ -10,7 +10,6 @@ from msagent.core.contracts.types.evaluation import (
     EvaluationVerdict,
     FailureType,
 )
-from msagent.core.contracts.types.mask import MockMask
 from msagent.core.contracts.types.prompt import (
     BoxPrompt,
     ExecutionHints,
@@ -57,7 +56,6 @@ __all__ = [
     "ExecutionHints",
     "FailureType",
     "ImplicitnessLevel",
-    "MockMask",
     "NormalizedBox",
     "PointHint",
     "PointPrompt",

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput, DiagnosticMessage
+from msagent.core.contracts.common import (
+    ArtifactKind,
+    BaseModuleInput,
+    BaseModuleOutput,
+    DiagnosticMessage,
+)
 from msagent.core.contracts.common import ModuleStatus
 from msagent.core.contracts.types import (
     BoxPrompt,
@@ -22,7 +27,7 @@ from msagent.core.contracts.types import (
     QueryUnderstandingResult,
     SpatialPromptBundle,
 )
-from msagent.infra.adapters import ArtifactKind, ArtifactStore
+from msagent.infra.adapters import ArtifactStore
 
 
 @dataclass(slots=True, kw_only=True)

@@ -10,13 +10,13 @@ from msagent.core.contracts.adapter_requests import (
     QueryUnderstandingAdapterRequest,
     SegmentAdapterRequest,
 )
+from msagent.core.contracts.common import ArtifactKind
 from msagent.core.contracts.types import (
     EvaluationIssue,
     EvaluationResult,
     EvaluationVerdict,
     FailureType,
     ImplicitnessLevel,
-    MockMask,
     NormalizedBox,
     PointHint,
     ProposalBridgeHint,
@@ -35,7 +35,8 @@ from msagent.core.contracts.types import (
     SpatialCue,
     TargetType,
 )
-from msagent.infra.adapters import ArtifactKind, ArtifactStore, LLMAdapter, LocatorAdapter, SAMAdapter
+from msagent.infra.adapters import ArtifactStore, LLMAdapter, LocatorAdapter, SAMAdapter
+from msagent.infra.mock_artifacts import MockMask
 
 
 @dataclass(slots=True)
@@ -185,19 +186,17 @@ class MockSAMAdapter(SAMAdapter):
     artifact_store: ArtifactStore = field(kw_only=True)
     mask_width: int = 10
     mask_height: int = 10
+    default_box: NormalizedBox = field(
+        default_factory=lambda: NormalizedBox(x1=0.25, y1=0.25, x2=0.75, y2=0.75)
+    )
 
     def segment(self, request: SegmentAdapterRequest) -> SegmentationResult:
-        first_box = request.prompt_package.spatial_prompts.boxes[0]
+        resolved_box = self._resolve_active_box(request)
         mask_payload = MockMask(
             mask_id=f"{request.task_id}-mask-1",
             width=self.mask_width,
             height=self.mask_height,
-            active_box=NormalizedBox(
-                x1=first_box.x1,
-                y1=first_box.y1,
-                x2=first_box.x2,
-                y2=first_box.y2,
-            ),
+            active_box=resolved_box,
             active_points=[
                 (
                     int(point.x * self.mask_width),
@@ -206,7 +205,7 @@ class MockSAMAdapter(SAMAdapter):
                 for point in request.prompt_package.spatial_prompts.positive_points
             ],
         )
-        mask_ref = self.artifact_store.save_artifact(ArtifactKind.MOCK_MASK, mask_payload)
+        mask_ref = self.artifact_store.save_artifact(ArtifactKind.MASK, mask_payload)
         candidate = SegmentationCandidate(
             candidate_id="segmentation-candidate-1",
             mask_ref=mask_ref,
@@ -222,3 +221,28 @@ class MockSAMAdapter(SAMAdapter):
             primary_candidate_id=candidate.candidate_id,
             diagnostics=["mock segmentation completed"],
         )
+
+    def _resolve_active_box(self, request: SegmentAdapterRequest) -> NormalizedBox:
+        boxes = request.prompt_package.spatial_prompts.boxes
+        if boxes:
+            first_box = boxes[0]
+            return NormalizedBox(
+                x1=first_box.x1,
+                y1=first_box.y1,
+                x2=first_box.x2,
+                y2=first_box.y2,
+            )
+
+        positive_points = request.prompt_package.spatial_prompts.positive_points
+        if positive_points:
+            xs = [point.x for point in positive_points]
+            ys = [point.y for point in positive_points]
+            margin = 0.08
+            return NormalizedBox(
+                x1=max(0.0, min(xs) - margin),
+                y1=max(0.0, min(ys) - margin),
+                x2=min(1.0, max(xs) + margin),
+                y2=min(1.0, max(ys) + margin),
+            )
+
+        return self.default_box

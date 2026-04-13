@@ -10,14 +10,19 @@ from pathlib import Path
 from types import UnionType
 from typing import get_args, get_origin, get_type_hints
 
-from msagent.core.contracts.common import ArtifactRef
+from msagent.core.contracts.common import ArtifactKind, ArtifactRef
+from msagent.core.contracts.types import (
+    EvaluationResult,
+    PromptPackage,
+    ProposalResult,
+    QueryUnderstandingResult,
+    SegmentationResult,
+)
 from msagent.infra.adapters import (
-    ArtifactKind,
     ArtifactStore,
     LoadedArtifactT,
-    get_artifact_payload_type,
-    resolve_artifact_kind,
 )
+from msagent.infra.mock_artifacts import MockMask
 
 
 def _is_union_type(type_hint: object) -> bool:
@@ -29,12 +34,25 @@ class LocalFileArtifactStore(ArtifactStore):
     """把结构化对象保存到本地 JSON 文件中。"""
 
     _index_filename = "_index.json"
+    _default_payload_registry: dict[ArtifactKind, type[object]] = {
+        ArtifactKind.QUERY_UNDERSTANDING_RESULT: QueryUnderstandingResult,
+        ArtifactKind.PROPOSAL_RESULT: ProposalResult,
+        ArtifactKind.PROMPT_PACKAGE: PromptPackage,
+        ArtifactKind.SEGMENTATION_RESULT: SegmentationResult,
+        ArtifactKind.EVALUATION_RESULT: EvaluationResult,
+        ArtifactKind.MASK: MockMask,
+    }
 
-    def __init__(self, root_uri: str) -> None:
+    def __init__(
+        self,
+        root_uri: str,
+        payload_registry: dict[ArtifactKind, type[object]] | None = None,
+    ) -> None:
         super().__init__(root_uri=root_uri)
         self.root_path = Path(root_uri)
         self.root_path.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root_path / self._index_filename
+        self.payload_registry = payload_registry or dict(self._default_payload_registry)
         if not self.index_path.exists():
             self.index_path.write_text(
                 json.dumps({"next_id": 1}, indent=2),
@@ -42,8 +60,8 @@ class LocalFileArtifactStore(ArtifactStore):
             )
 
     def save_artifact(self, artifact_type: ArtifactKind, payload: object) -> ArtifactRef:
-        expected_type = get_artifact_payload_type(artifact_type)
-        if not isinstance(payload, expected_type):
+        expected_type = self._get_payload_type(artifact_type)
+        if type(payload) is not expected_type:
             raise TypeError(
                 f"Artifact payload type mismatch for {artifact_type.value}: "
                 f"expected {expected_type.__name__}, got {type(payload).__name__}"
@@ -68,7 +86,7 @@ class LocalFileArtifactStore(ArtifactStore):
 
         return ArtifactRef(
             artifact_id=artifact_id,
-            artifact_type=artifact_type.value,
+            artifact_type=artifact_type,
             summary=f"{artifact_type.value}:{artifact_id}",
         )
 
@@ -77,15 +95,15 @@ class LocalFileArtifactStore(ArtifactStore):
         artifact_ref: ArtifactRef,
         expected_type: type[LoadedArtifactT],
     ) -> LoadedArtifactT:
-        artifact_path = self.root_path / artifact_ref.artifact_type / (
+        artifact_path = self.root_path / artifact_ref.artifact_type.value / (
             f"{artifact_ref.artifact_id}.json"
         )
         if not artifact_path.exists():
             raise FileNotFoundError(f"Artifact not found: {artifact_path}")
 
         record = json.loads(artifact_path.read_text(encoding="utf-8"))
-        artifact_kind = resolve_artifact_kind(artifact_ref.artifact_type)
-        registered_type = get_artifact_payload_type(artifact_kind)
+        artifact_kind = artifact_ref.artifact_type
+        registered_type = self._get_payload_type(artifact_kind)
         if expected_type is not registered_type:
             raise TypeError(
                 f"Artifact expected type mismatch for {artifact_kind.value}: "
@@ -108,6 +126,12 @@ class LocalFileArtifactStore(ArtifactStore):
                 f"expected {expected_type.__name__}, got {type(payload).__name__}"
             )
         return payload
+
+    def _get_payload_type(self, artifact_kind: ArtifactKind) -> type[object]:
+        try:
+            return self.payload_registry[artifact_kind]
+        except KeyError as exc:
+            raise KeyError(f"Unregistered artifact kind: {artifact_kind.value}") from exc
 
     def _next_artifact_id(self, artifact_type: ArtifactKind) -> str:
         index = json.loads(self.index_path.read_text(encoding="utf-8"))

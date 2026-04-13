@@ -10,10 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from msagent.core.contracts.adapter_requests import SegmentAdapterRequest
-from msagent.core.contracts.common import BaseModuleInput, BaseModuleOutput
+from msagent.core.contracts.common import ArtifactKind, BaseModuleInput, BaseModuleOutput
 from msagent.core.contracts.common import ModuleStatus
 from msagent.core.contracts.types import PromptPackage, SegmentationResult, SegmentationStatus
-from msagent.infra.adapters import ArtifactKind, ArtifactStore, SAMAdapter
+from msagent.infra.adapters import ArtifactStore, SAMAdapter
 
 
 @dataclass(slots=True, kw_only=True)
@@ -68,7 +68,7 @@ class SAMSegmenterModule(SegmenterModule):
                 (
                     ref
                     for ref in module_input.upstream_refs
-                    if ref.artifact_type == ArtifactKind.PROMPT_PACKAGE.value
+                    if ref.artifact_type is ArtifactKind.PROMPT_PACKAGE
                 ),
                 None,
             )
