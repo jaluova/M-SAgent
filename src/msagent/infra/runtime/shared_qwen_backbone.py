@@ -166,15 +166,18 @@ class QwenSharedVisionLanguageBackbone(SharedVisionLanguageBackbone):
         session: FeatureSessionHandle | None = None,
         max_length: int | None = None,
     ) -> EncodedFeatureHandle:
-        import torch
-
         if self.tokenizer is None:
             raise RuntimeError("Shared Qwen backbone does not expose a tokenizer")
+        if max_length is not None and max_length <= 0:
+            raise ValueError("QwenSharedVisionLanguageBackbone.encode_text max_length must be > 0")
+
+        import torch
+
         encoding = self.tokenizer(
             text,
             padding="max_length",
             truncation=True,
-            max_length=max_length or 512,
+            max_length=512 if max_length is None else max_length,
             return_tensors="pt",
         )
         input_ids = encoding["input_ids"].to(self.text_device())

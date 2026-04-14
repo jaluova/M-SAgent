@@ -103,6 +103,7 @@ class RealEmbeddedRuntimeSmokeTests(unittest.TestCase):
                     )
                 )
         finally:
+            runtime.close()
             provider.close()
 
         self.assertIs(output.status, ModuleStatus.SUCCESS)

@@ -41,7 +41,9 @@ from msagent.infra.adapters import LocatorAdapter
 from msagent.infra.embedded_locator import EmbeddedLocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
 from msagent.infra.mock_adapters import MockLLMAdapter, MockSAMAdapter
+from msagent.infra.runtime.shared_qwen_backbone import QwenSharedVisionLanguageBackbone
 from msagent.infra.runtime.train_adapter_runtime import (
+    DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE,
     EmbeddedGridGroundRuntimeConfig,
     EmbeddedGridGroundTrainAdapterRuntime,
     EmbeddedLocateBridgeHint,
@@ -308,6 +310,25 @@ class PickleTorchModule(ModuleType):
         self.save_calls.append((path, payload))
         with path.open("wb") as handle:
             pickle.dump(payload, handle)
+
+
+class WeightsOnlyFallbackTorchModule(ModuleType):
+    def __init__(self) -> None:
+        super().__init__("torch")
+        self.load_calls: list[tuple[Path, str | None, bool | None]] = []
+        self.payload = {"adapter.layer": "value"}
+
+    def load(
+        self,
+        checkpoint_path: str | Path,
+        map_location: str | None = None,
+        weights_only: bool | None = None,
+    ) -> object:
+        path = Path(checkpoint_path)
+        self.load_calls.append((path, map_location, weights_only))
+        if weights_only is True:
+            raise RuntimeError("weights only load failed")
+        return dict(self.payload)
 
 
 class FakeLoadTrackingAdapter:
@@ -670,6 +691,25 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
 
         self.assertEqual(max_length, 640)
 
+    def test_runtime_config_from_json_file_rejects_non_positive_max_length(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text('{"model": {}, "data": {"max_length": 0}, "runtime": {}}', encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "max_length must be > 0"):
+                EmbeddedGridGroundRuntimeConfig.from_json_file(config_path)
+
+    def test_shared_qwen_backbone_encode_text_rejects_non_positive_max_length(self) -> None:
+        backbone = QwenSharedVisionLanguageBackbone(
+            backbone_name="qwen-test-backbone",
+            tokenizer=object(),
+            qwen_model=object(),
+            qwen_processor=object(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "max_length must be > 0"):
+            backbone.encode_text("truck", max_length=0)
+
     def test_checkpoint_loader_prefers_adapter_only_sidecar(self) -> None:
         provider = FakeSharedQwenProvider()
         runtime = EmbeddedGridGroundTrainAdapterRuntime(
@@ -693,6 +733,24 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         self.assertEqual(result, {"layer": "value"})
         load_path = mocked_torch_load.call_args.args[0]
         self.assertEqual(str(load_path), "/tmp/best_model.adapter_only.pth")
+
+    def test_torch_load_checkpoint_falls_back_with_explicit_weights_only_false(self) -> None:
+        fake_torch = WeightsOnlyFallbackTorchModule()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            checkpoint_path.write_bytes(b"fake-checkpoint")
+
+            payload = EmbeddedGridGroundTrainAdapterRuntime._torch_load_checkpoint(checkpoint_path)
+
+        self.assertEqual(payload, {"adapter.layer": "value"})
+        self.assertEqual(
+            fake_torch.load_calls,
+            [
+                (checkpoint_path, "cpu", True),
+                (checkpoint_path, "cpu", False),
+            ],
+        )
 
     def test_get_or_load_adapter_caches_filtered_adapter_state_after_validation(self) -> None:
         provider = FakeSharedQwenProvider()
@@ -734,6 +792,48 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         save_path, saved_state_dict = mocked_torch_save.call_args.args
         self.assertEqual(saved_state_dict, {"layer": "value", "other": "value-2"})
         self.assertEqual(str(save_path), "/tmp/best_model.adapter_only.pth")
+
+    def test_reset_drops_cached_adapter_and_forces_reload_on_next_access(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_adapter_module = make_fake_embedded_adapter_module()
+        FakeLoadTrackingAdapter.reset_instances()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-reset-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        with mock.patch(
+            "pathlib.Path.is_file",
+            autospec=True,
+            return_value=False,
+        ), mock.patch.dict(
+            sys.modules,
+            {"msagent.infra.runtime.embedded_gridground_adapter": fake_adapter_module},
+        ), mock.patch(
+            "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_load_checkpoint",
+            return_value={
+                "model_state_dict": {
+                    "module.adapter.layer": "value",
+                    "module.adapter.other": "value-2",
+                }
+            },
+        ) as mocked_torch_load, mock.patch(
+            "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_save_checkpoint"
+        ):
+            first_adapter = runtime._get_or_load_adapter(provider.backbone)
+            runtime.reset()
+            second_adapter = runtime._get_or_load_adapter(provider.backbone)
+            runtime.close()
+
+        self.assertIsNone(runtime._adapter_module)
+        self.assertIsNot(first_adapter, second_adapter)
+        self.assertEqual(mocked_torch_load.call_count, 2)
+        self.assertEqual(len(FakeLoadTrackingAdapter.instances), 2)
+        self.assertEqual(FakeLoadTrackingAdapter.instances[0].to_device, "cpu")
+        self.assertEqual(FakeLoadTrackingAdapter.instances[1].to_device, "cpu")
 
     def test_checkpoint_loader_reads_nested_checkpoint_from_real_file(self) -> None:
         provider = FakeSharedQwenProvider()
@@ -1032,7 +1132,7 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             )
 
             loaded_adapter = runtime._get_or_load_adapter(provider.backbone)
-            refreshed_sidecar = torch.load(sidecar_path, map_location="cpu")
+            refreshed_sidecar = runtime._torch_load_checkpoint(sidecar_path)
 
         loaded_state_dict = loaded_adapter.state_dict()
         for key, expected_value in base_state_dict.items():
@@ -1114,6 +1214,24 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(result, {"layer": "value", "other": "value-2"})
+
+    def test_runtime_config_from_json_file_uses_literal_defaults_when_runtime_section_is_missing(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text('{"model": {}, "data": {}, "runtime": {}}', encoding="utf-8")
+
+            config = EmbeddedGridGroundRuntimeConfig.from_json_file(config_path)
+
+        self.assertEqual(
+            config.instruction_template,
+            DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE,
+        )
+        self.assertEqual(
+            config.instruction_template.format(query_text="truck"),
+            "Given the grid coordinate system, locate the referent described as "
+            "'truck' in the image and predict the most likely target points.",
+        )
+        self.assertIsNone(config.focus_terms_template)
 
     def test_proposal_engine_runs_through_embedded_locator(self) -> None:
         with TemporaryDirectory() as tmp_dir:

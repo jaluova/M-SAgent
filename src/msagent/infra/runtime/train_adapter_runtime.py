@@ -16,6 +16,12 @@ from msagent.infra.backbones import (
     SharedVisionLanguageBackbone,
 )
 
+DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE = (
+    "Given the grid coordinate system, locate the referent described as "
+    "'{query_text}' in the image and predict the most likely target points."
+)
+DEFAULT_EMBEDDED_GRIDGROUND_FOCUS_TERMS_TEMPLATE: str | None = None
+
 
 @dataclass(slots=True)
 class EmbeddedLocateBridgeHint:
@@ -89,6 +95,14 @@ class TrainAdapterRuntime:
     ) -> EmbeddedLocatePrediction:
         """执行 embedded locate 推理。"""
         raise NotImplementedError
+
+    def reset(self) -> None:
+        """重置 runtime 内部缓存。"""
+        return None
+
+    def close(self) -> None:
+        """释放 runtime 持有的底层资源。"""
+        self.reset()
 
 
 @dataclass(slots=True)
@@ -184,11 +198,12 @@ class EmbeddedGridGroundRuntimeConfig:
     max_k: int = 3
     min_point_confidence: float = 0.0
     box_margin_ratio: float = 0.12
-    instruction_template: str = (
-        "Given the grid coordinate system, locate the referent described as "
-        "'{query_text}' in the image and predict the most likely target points."
-    )
-    focus_terms_template: str | None = None
+    instruction_template: str = DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE
+    focus_terms_template: str | None = DEFAULT_EMBEDDED_GRIDGROUND_FOCUS_TERMS_TEMPLATE
+
+    def __post_init__(self) -> None:
+        if self.max_length <= 0:
+            raise ValueError("EmbeddedGridGroundRuntimeConfig.max_length must be > 0")
 
     @classmethod
     def from_json_file(
@@ -206,17 +221,18 @@ class EmbeddedGridGroundRuntimeConfig:
         model = payload.get("model", {})
         data = payload.get("data", {})
         runtime = payload.get("runtime", {})
+        defaults = cls()
         return cls(
-            adapter_type=model.get("adapter_type", cls.adapter_type),
-            visual_dim=int(model.get("visual_dim", cls.visual_dim)),
-            grid_feature_dim=int(model.get("grid_feature_dim", cls.grid_feature_dim)),
-            hidden_dim=int(model.get("hidden_dim", cls.hidden_dim)),
-            num_heads=int(model.get("num_heads", cls.num_heads)),
-            num_grid_tokens=int(model.get("num_grid_tokens", cls.num_grid_tokens)),
-            num_output_points=int(model.get("num_output_points", cls.num_output_points)),
-            dropout=float(model.get("dropout", cls.dropout)),
-            grid_size=int(model.get("grid_size", cls.grid_size)),
-            max_length=int(data.get("max_length", cls.max_length)),
+            adapter_type=model.get("adapter_type", defaults.adapter_type),
+            visual_dim=int(model.get("visual_dim", defaults.visual_dim)),
+            grid_feature_dim=int(model.get("grid_feature_dim", defaults.grid_feature_dim)),
+            hidden_dim=int(model.get("hidden_dim", defaults.hidden_dim)),
+            num_heads=int(model.get("num_heads", defaults.num_heads)),
+            num_grid_tokens=int(model.get("num_grid_tokens", defaults.num_grid_tokens)),
+            num_output_points=int(model.get("num_output_points", defaults.num_output_points)),
+            dropout=float(model.get("dropout", defaults.dropout)),
+            grid_size=int(model.get("grid_size", defaults.grid_size)),
+            max_length=int(data.get("max_length", defaults.max_length)),
             abs_threshold=abs_threshold,
             rel_ratio=rel_ratio,
             min_k=min_k,
@@ -225,11 +241,11 @@ class EmbeddedGridGroundRuntimeConfig:
             box_margin_ratio=box_margin_ratio,
             instruction_template=runtime.get(
                 "instruction_template",
-                cls.instruction_template,
+                DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE,
             ),
             focus_terms_template=runtime.get(
                 "focus_terms_template",
-                cls.focus_terms_template,
+                DEFAULT_EMBEDDED_GRIDGROUND_FOCUS_TERMS_TEMPLATE,
             ),
         )
 
@@ -419,6 +435,25 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
         del request
         return self.runtime_config.max_length
 
+    def reset(self) -> None:
+        adapter = self._adapter_module
+        self._adapter_module = None
+        if adapter is None:
+            return None
+
+        try:
+            adapter.to(device="cpu")
+        except Exception:
+            pass
+
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            return None
+
     def _get_or_load_adapter(self, backbone: SharedVisionLanguageBackbone) -> object:
         from msagent.infra.runtime.embedded_gridground_adapter import (
             CoordinateAdapter,
@@ -569,7 +604,10 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
         except TypeError:
             return torch.load(checkpoint_path, map_location="cpu")
         except Exception:
-            return torch.load(checkpoint_path, map_location="cpu")
+            try:
+                return torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            except TypeError:
+                return torch.load(checkpoint_path, map_location="cpu")
 
     @classmethod
     def _extract_adapter_state_dict(
