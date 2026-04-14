@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
+import pickle
 import sys
+from types import ModuleType
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -58,6 +61,9 @@ from msagent.modules.query_understanding import LLMQueryUnderstandingModule
 from msagent.modules.segmenter import SAMSegmenterModule
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestratorDependencies
 from msagent.service.cli import CLIRequest, CLIService
+
+
+TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
 def make_understanding() -> QueryUnderstandingResult:
@@ -280,6 +286,90 @@ class LegacyUriOnlyLocatorAdapter(LocatorAdapter):
         )
 
 
+class PickleTorchModule(ModuleType):
+    def __init__(self) -> None:
+        super().__init__("torch")
+        self.load_calls: list[tuple[Path, str | None, bool | None]] = []
+        self.save_calls: list[tuple[Path, object]] = []
+
+    def load(
+        self,
+        checkpoint_path: str | Path,
+        map_location: str | None = None,
+        weights_only: bool | None = None,
+    ) -> object:
+        path = Path(checkpoint_path)
+        self.load_calls.append((path, map_location, weights_only))
+        with path.open("rb") as handle:
+            return pickle.load(handle)
+
+    def save(self, payload: object, checkpoint_path: str | Path) -> None:
+        path = Path(checkpoint_path)
+        self.save_calls.append((path, payload))
+        with path.open("wb") as handle:
+            pickle.dump(payload, handle)
+
+
+class FakeLoadTrackingAdapter:
+    instances: list["FakeLoadTrackingAdapter"] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        self.init_kwargs = kwargs
+        self.loaded_state_dict: dict[str, object] | None = None
+        self.eval_called = False
+        self.to_device: str | None = None
+        type(self).instances.append(self)
+
+    @classmethod
+    def reset_instances(cls) -> None:
+        cls.instances = []
+
+    def state_dict(self) -> dict[str, object]:
+        return {"layer": object(), "other": object()}
+
+    def load_state_dict(
+        self,
+        state_dict: dict[str, object],
+        strict: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        del strict
+        self.loaded_state_dict = dict(state_dict)
+        expected_keys = set(self.state_dict().keys())
+        provided_keys = set(state_dict.keys())
+        missing_keys = sorted(expected_keys - provided_keys)
+        unexpected_keys = sorted(provided_keys - expected_keys)
+        return missing_keys, unexpected_keys
+
+    def eval(self) -> "FakeLoadTrackingAdapter":
+        self.eval_called = True
+        return self
+
+    def to(self, *, device: str) -> "FakeLoadTrackingAdapter":
+        self.to_device = device
+        return self
+
+
+class ShapeMismatchFakeLoadTrackingAdapter(FakeLoadTrackingAdapter):
+    def load_state_dict(
+        self,
+        state_dict: dict[str, object],
+        strict: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        if state_dict.get("layer") == "bad-shape":
+            self.loaded_state_dict = dict(state_dict)
+            raise RuntimeError("shape mismatch for layer")
+        return super().load_state_dict(state_dict, strict=strict)
+
+
+def make_fake_embedded_adapter_module(
+    adapter_cls: type[FakeLoadTrackingAdapter] = FakeLoadTrackingAdapter,
+) -> ModuleType:
+    module = ModuleType("msagent.infra.runtime.embedded_gridground_adapter")
+    module.CoordinateAdapter = adapter_cls
+    module.LightweightCoordinateAdapter = adapter_cls
+    return module
+
+
 def build_cli_service_with_embedded_locator(
     artifact_root: Path,
     locator_adapter: LocatorAdapter,
@@ -419,6 +509,35 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             runtime.prepare_feature_context(
                 TrainAdapterRuntimeRequest(
                     task_id="task-prepare-failure",
+                    image_ref=ImageRef(uri="/tmp/input.png"),
+                    query_text="the small red cup",
+                    focus_terms=["small", "red", "cup"],
+                )
+            )
+
+        self.assertEqual(len(provider.backbone.session_handles), 1)
+        self.assertEqual(
+            provider.backbone.released_sessions,
+            [provider.backbone.session_handles[0].session_id],
+        )
+
+    def test_prepare_feature_context_releases_session_on_instruction_render_failure(self) -> None:
+        provider = ReleaseTrackingSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-instruction-render-failure",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(
+                max_length=384,
+                instruction_template="Locate '{missing_key}' on the grid.",
+            ),
+        )
+
+        with self.assertRaisesRegex(KeyError, "missing_key"):
+            runtime.prepare_feature_context(
+                TrainAdapterRuntimeRequest(
+                    task_id="task-instruction-render-failure",
                     image_ref=ImageRef(uri="/tmp/input.png"),
                     query_text="the small red cup",
                     focus_terms=["small", "red", "cup"],
@@ -575,8 +694,10 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         load_path = mocked_torch_load.call_args.args[0]
         self.assertEqual(str(load_path), "/tmp/best_model.adapter_only.pth")
 
-    def test_checkpoint_loader_caches_filtered_adapter_state(self) -> None:
+    def test_get_or_load_adapter_caches_filtered_adapter_state_after_validation(self) -> None:
         provider = FakeSharedQwenProvider()
+        fake_adapter_module = make_fake_embedded_adapter_module()
+        FakeLoadTrackingAdapter.reset_instances()
         runtime = EmbeddedGridGroundTrainAdapterRuntime(
             runtime_name="embedded-runtime-checkpoint-test",
             backbone_provider=provider,
@@ -589,20 +710,334 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             "pathlib.Path.is_file",
             autospec=True,
             return_value=False,
+        ), mock.patch.dict(
+            sys.modules,
+            {"msagent.infra.runtime.embedded_gridground_adapter": fake_adapter_module},
         ), mock.patch(
             "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_load_checkpoint",
-            return_value={"model_state_dict": {"module.adapter.layer": "value", "ignored": "noise"}},
+            return_value={
+                "model_state_dict": {
+                    "module.adapter.layer": "value",
+                    "module.adapter.other": "value-2",
+                    "ignored": "noise",
+                }
+            },
         ) as mocked_torch_load, mock.patch(
             "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_save_checkpoint"
         ) as mocked_torch_save:
-            result = runtime._load_adapter_state_dict(target_keys={"layer"})
+            adapter = runtime._get_or_load_adapter(provider.backbone)
 
-        self.assertEqual(result, {"layer": "value"})
+        self.assertIs(adapter, runtime._adapter_module)
+        self.assertEqual(adapter.loaded_state_dict, {"layer": "value", "other": "value-2"})
         mocked_torch_load.assert_called_once()
         mocked_torch_save.assert_called_once()
         save_path, saved_state_dict = mocked_torch_save.call_args.args
-        self.assertEqual(saved_state_dict, {"layer": "value"})
+        self.assertEqual(saved_state_dict, {"layer": "value", "other": "value-2"})
         self.assertEqual(str(save_path), "/tmp/best_model.adapter_only.pth")
+
+    def test_checkpoint_loader_reads_nested_checkpoint_from_real_file(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_torch = PickleTorchModule()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-checkpoint-file-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+            runtime._torch_save_checkpoint(
+                checkpoint_path,
+                {
+                    "state_dict": {
+                        "module.adapter.layer": "stale",
+                    },
+                    "model": {
+                        "module": {
+                            "adapter_state_dict": {
+                                "adapter.layer": "fresh",
+                                "adapter.other": "fresh-other",
+                            }
+                        }
+                    },
+                    "metadata": {"epoch": 12},
+                },
+            )
+
+            result = runtime._load_adapter_state_dict(target_keys={"layer", "other"})
+
+        self.assertEqual(result, {"layer": "fresh", "other": "fresh-other"})
+        self.assertEqual(fake_torch.load_calls, [(checkpoint_path, "cpu", True)])
+
+    def test_checkpoint_loader_prefers_real_adapter_only_sidecar_file(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_torch = PickleTorchModule()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            sidecar_path = checkpoint_path.with_name("best_model.adapter_only.pth")
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-checkpoint-sidecar-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+            runtime._torch_save_checkpoint(
+                checkpoint_path,
+                {"state_dict": {"module.adapter.layer": "stale-base"}},
+            )
+            runtime._torch_save_checkpoint(
+                sidecar_path,
+                {"adapter.layer": "fresh-sidecar"},
+            )
+
+            result = runtime._load_adapter_state_dict(target_keys={"layer"})
+
+        self.assertEqual(result, {"layer": "fresh-sidecar"})
+        self.assertEqual(fake_torch.load_calls, [(sidecar_path, "cpu", True)])
+
+    def test_checkpoint_loader_falls_back_to_base_file_when_sidecar_has_no_matching_keys(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_torch = PickleTorchModule()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            sidecar_path = checkpoint_path.with_name("best_model.adapter_only.pth")
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-checkpoint-sidecar-fallback-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+            runtime._torch_save_checkpoint(
+                checkpoint_path,
+                {"state_dict": {"module.adapter.layer": "fresh-base"}},
+            )
+            runtime._torch_save_checkpoint(
+                sidecar_path,
+                {"metadata": {"source": "stale-sidecar-only"}},
+            )
+
+            result = runtime._load_adapter_state_dict(target_keys={"layer"})
+
+        self.assertEqual(result, {"layer": "fresh-base"})
+        self.assertEqual(
+            fake_torch.load_calls,
+            [
+                (sidecar_path, "cpu", True),
+                (checkpoint_path, "cpu", True),
+            ],
+        )
+
+    def test_get_or_load_adapter_falls_back_to_base_checkpoint_when_sidecar_is_incomplete(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_torch = PickleTorchModule()
+        fake_adapter_module = make_fake_embedded_adapter_module()
+        FakeLoadTrackingAdapter.reset_instances()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(
+            sys.modules,
+            {
+                "torch": fake_torch,
+                "msagent.infra.runtime.embedded_gridground_adapter": fake_adapter_module,
+            },
+        ):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            sidecar_path = checkpoint_path.with_name("best_model.adapter_only.pth")
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-adapter-fallback-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+            runtime._torch_save_checkpoint(
+                checkpoint_path,
+                {"state_dict": {"module.adapter.layer": "fresh", "module.adapter.other": "fresh-other"}},
+            )
+            runtime._torch_save_checkpoint(
+                sidecar_path,
+                {"adapter.layer": "stale-sidecar"},
+            )
+
+            adapter = runtime._get_or_load_adapter(provider.backbone)
+
+        self.assertIs(adapter, runtime._adapter_module)
+        self.assertEqual(adapter.loaded_state_dict, {"layer": "fresh", "other": "fresh-other"})
+        self.assertTrue(adapter.eval_called)
+        self.assertEqual(adapter.to_device, "cpu")
+        self.assertEqual(
+            len(FakeLoadTrackingAdapter.instances),
+            2,
+        )
+        self.assertEqual(
+            FakeLoadTrackingAdapter.instances[0].loaded_state_dict,
+            {"layer": "stale-sidecar"},
+        )
+        self.assertEqual(
+            FakeLoadTrackingAdapter.instances[1].loaded_state_dict,
+            {"layer": "fresh", "other": "fresh-other"},
+        )
+        self.assertEqual(
+            fake_torch.load_calls,
+            [
+                (sidecar_path, "cpu", True),
+                (checkpoint_path, "cpu", True),
+            ],
+        )
+        self.assertEqual(
+            fake_torch.save_calls[-1],
+            (sidecar_path, {"layer": "fresh", "other": "fresh-other"}),
+        )
+
+    def test_get_or_load_adapter_does_not_refresh_sidecar_when_base_checkpoint_fails_validation(self) -> None:
+        provider = FakeSharedQwenProvider()
+        fake_torch = PickleTorchModule()
+        fake_adapter_module = make_fake_embedded_adapter_module(ShapeMismatchFakeLoadTrackingAdapter)
+        ShapeMismatchFakeLoadTrackingAdapter.reset_instances()
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(
+            sys.modules,
+            {
+                "torch": fake_torch,
+                "msagent.infra.runtime.embedded_gridground_adapter": fake_adapter_module,
+            },
+        ):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            sidecar_path = checkpoint_path.with_name("best_model.adapter_only.pth")
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-adapter-shape-mismatch-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+            runtime._torch_save_checkpoint(
+                checkpoint_path,
+                {"state_dict": {"module.adapter.layer": "bad-shape", "module.adapter.other": "bad-other"}},
+            )
+            runtime._torch_save_checkpoint(
+                sidecar_path,
+                {"adapter.layer": "stale-sidecar"},
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "shape mismatch for layer"):
+                runtime._get_or_load_adapter(provider.backbone)
+
+            sidecar_payload = runtime._torch_load_checkpoint(sidecar_path)
+
+        self.assertEqual(sidecar_payload, {"adapter.layer": "stale-sidecar"})
+        self.assertEqual(
+            fake_torch.load_calls,
+            [
+                (sidecar_path, "cpu", True),
+                (checkpoint_path, "cpu", True),
+                (sidecar_path, "cpu", True),
+            ],
+        )
+        self.assertEqual(
+            fake_torch.save_calls,
+            [
+                (checkpoint_path, {"state_dict": {"module.adapter.layer": "bad-shape", "module.adapter.other": "bad-other"}}),
+                (sidecar_path, {"adapter.layer": "stale-sidecar"}),
+            ],
+        )
+
+    @unittest.skipUnless(TORCH_AVAILABLE, "real torch is not available in this Python 3.10 environment")
+    def test_get_or_load_adapter_with_real_torch_module_falls_back_to_base_checkpoint(self) -> None:
+        import torch
+
+        provider = FakeSharedQwenProvider()
+
+        real_torch_module = ModuleType("msagent.infra.runtime.embedded_gridground_adapter")
+
+        class TinyRealTorchAdapter(torch.nn.Module):
+            def __init__(
+                self,
+                *,
+                visual_dim: int,
+                grid_feature_dim: int,
+                hidden_dim: int,
+                num_heads: int,
+                num_grid_tokens: int,
+                num_output_points: int,
+                dropout: float,
+                grid_size: int,
+            ) -> None:
+                del visual_dim
+                del grid_feature_dim
+                del hidden_dim
+                del num_heads
+                del num_grid_tokens
+                del num_output_points
+                del dropout
+                del grid_size
+                super().__init__()
+                self.layer = torch.nn.Linear(2, 2)
+                self.other = torch.nn.Parameter(torch.zeros(2))
+
+        real_torch_module.CoordinateAdapter = TinyRealTorchAdapter
+        real_torch_module.LightweightCoordinateAdapter = TinyRealTorchAdapter
+
+        with TemporaryDirectory() as tmp_dir, mock.patch.dict(
+            sys.modules,
+            {"msagent.infra.runtime.embedded_gridground_adapter": real_torch_module},
+        ):
+            checkpoint_path = Path(tmp_dir) / "best_model.pth"
+            sidecar_path = checkpoint_path.with_name("best_model.adapter_only.pth")
+            runtime = EmbeddedGridGroundTrainAdapterRuntime(
+                runtime_name="embedded-runtime-real-torch-checkpoint-test",
+                backbone_provider=provider,
+                adapter_path=str(checkpoint_path),
+                config_path="/tmp/config.json",
+                runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+            )
+
+            base_adapter = TinyRealTorchAdapter(
+                visual_dim=runtime.runtime_config.visual_dim,
+                grid_feature_dim=runtime.runtime_config.grid_feature_dim,
+                hidden_dim=runtime.runtime_config.hidden_dim,
+                num_heads=runtime.runtime_config.num_heads,
+                num_grid_tokens=runtime.runtime_config.num_grid_tokens,
+                num_output_points=runtime.runtime_config.num_output_points,
+                dropout=runtime.runtime_config.dropout,
+                grid_size=runtime.runtime_config.grid_size,
+            )
+            with torch.no_grad():
+                base_adapter.layer.weight.copy_(torch.tensor([[1.5, 2.5], [3.5, 4.5]]))
+                base_adapter.layer.bias.copy_(torch.tensor([5.5, 6.5]))
+                base_adapter.other.copy_(torch.tensor([7.5, 8.5]))
+
+            base_state_dict = base_adapter.state_dict()
+            torch.save(
+                {
+                    "model": {
+                        "module": {
+                            "adapter_state_dict": {
+                                f"adapter.{key}": value.clone()
+                                for key, value in base_state_dict.items()
+                            }
+                        }
+                    }
+                },
+                checkpoint_path,
+            )
+            torch.save(
+                {"adapter.layer.weight": base_state_dict["layer.weight"].clone()},
+                sidecar_path,
+            )
+
+            loaded_adapter = runtime._get_or_load_adapter(provider.backbone)
+            refreshed_sidecar = torch.load(sidecar_path, map_location="cpu")
+
+        loaded_state_dict = loaded_adapter.state_dict()
+        for key, expected_value in base_state_dict.items():
+            self.assertTrue(torch.equal(loaded_state_dict[key], expected_value), key)
+            self.assertTrue(torch.equal(refreshed_sidecar[key], expected_value), key)
 
     def test_checkpoint_loader_accepts_nested_state_dict_container(self) -> None:
         provider = FakeSharedQwenProvider()

@@ -132,8 +132,8 @@ class SharedBackboneTrainAdapterRuntime(TrainAdapterRuntime):
             task_id=request.task_id,
             metadata={"runtime_name": self.runtime_name},
         )
-        instruction_text = self.build_instruction(request)
         try:
+            instruction_text = self.build_instruction(request)
             image_features = backbone.encode_image(request.image_ref, session=session)
             text_features = backbone.encode_text(
                 instruction_text,
@@ -420,8 +420,6 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
         return self.runtime_config.max_length
 
     def _get_or_load_adapter(self, backbone: SharedVisionLanguageBackbone) -> object:
-        import torch
-
         from msagent.infra.runtime.embedded_gridground_adapter import (
             CoordinateAdapter,
             LightweightCoordinateAdapter,
@@ -444,37 +442,134 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                 if self.runtime_config.adapter_type == "lightweight"
                 else CoordinateAdapter
             )
-            adapter = adapter_cls(**adapter_kwargs)
-            state_dict = self._load_adapter_state_dict(
-                target_keys=set(adapter.state_dict().keys())
+            prototype_adapter = adapter_cls(**adapter_kwargs)
+            target_keys = set(prototype_adapter.state_dict().keys())
+            self._adapter_module = self._load_adapter_module(
+                adapter_cls=adapter_cls,
+                adapter_kwargs=adapter_kwargs,
+                target_keys=target_keys,
+                prototype_adapter=prototype_adapter,
             )
-            missing_keys, unexpected_keys = adapter.load_state_dict(state_dict, strict=False)
-            if missing_keys:
-                raise RuntimeError(f"Embedded runtime missing keys: {missing_keys}")
-            if unexpected_keys:
-                raise RuntimeError(f"Embedded runtime unexpected keys: {unexpected_keys}")
-            adapter.eval()
-            self._adapter_module = adapter
 
         visual_device = backbone.visual_device() if hasattr(backbone, "visual_device") else backbone.device
         self._adapter_module.to(device=visual_device)
         return self._adapter_module
 
-    def _load_adapter_state_dict(self, *, target_keys: set[str]) -> dict[str, object]:
-        checkpoint_path = self._resolve_checkpoint_path()
-        checkpoint = self._torch_load_checkpoint(checkpoint_path)
-        normalized = self._extract_adapter_state_dict(checkpoint, target_keys=target_keys)
-        if not normalized:
-            raise RuntimeError(
-                f"No adapter weights matched the embedded runtime checkpoint: {checkpoint_path}"
-            )
+    def _load_adapter_module(
+        self,
+        *,
+        adapter_cls: type[object],
+        adapter_kwargs: dict[str, object],
+        target_keys: set[str],
+        prototype_adapter: object | None = None,
+    ) -> object:
+        errors: list[str] = []
         compact_checkpoint_path = self._compact_checkpoint_path()
-        if checkpoint_path != compact_checkpoint_path:
+        for index, checkpoint_path in enumerate(self._iter_candidate_checkpoint_paths()):
+            adapter = (
+                prototype_adapter
+                if index == 0 and prototype_adapter is not None
+                else adapter_cls(**adapter_kwargs)
+            )
             try:
-                self._torch_save_checkpoint(compact_checkpoint_path, normalized)
-            except Exception:
-                pass
-        return normalized
+                state_dict = self._load_adapter_state_dict(
+                    target_keys=target_keys,
+                    checkpoint_path=checkpoint_path,
+                )
+                missing_keys, unexpected_keys = adapter.load_state_dict(state_dict, strict=False)
+            except Exception as exc:
+                errors.append(f"{checkpoint_path}: {exc}")
+                continue
+            if missing_keys:
+                errors.append(f"{checkpoint_path}: Embedded runtime missing keys: {missing_keys}")
+                continue
+            if unexpected_keys:
+                errors.append(
+                    f"{checkpoint_path}: Embedded runtime unexpected keys: {unexpected_keys}"
+                )
+                continue
+            if checkpoint_path != compact_checkpoint_path:
+                try:
+                    self._torch_save_checkpoint(compact_checkpoint_path, state_dict)
+                except Exception:
+                    pass
+            adapter.eval()
+            return adapter
+
+        details = "; ".join(errors) if errors else "no checkpoint candidates were loadable"
+        raise RuntimeError(f"Failed to load embedded runtime adapter checkpoint: {details}")
+
+    def _load_adapter_state_dict(
+        self,
+        *,
+        target_keys: set[str],
+        checkpoint_path: Path | None = None,
+    ) -> dict[str, object]:
+        errors: list[str] = []
+        checkpoint_paths = (
+            [checkpoint_path]
+            if checkpoint_path is not None
+            else list(self._iter_candidate_checkpoint_paths())
+        )
+
+        for candidate_path in checkpoint_paths:
+            try:
+                checkpoint = self._torch_load_checkpoint(candidate_path)
+                normalized = self._extract_adapter_state_dict(checkpoint, target_keys=target_keys)
+            except Exception as exc:
+                errors.append(f"{candidate_path}: {exc}")
+                continue
+            if not normalized:
+                errors.append(
+                    f"{candidate_path}: No adapter weights matched the embedded runtime checkpoint"
+                )
+                continue
+            return normalized
+
+        detail = "; ".join(errors) if errors else "no checkpoint candidates were attempted"
+        raise RuntimeError(f"Failed to extract embedded runtime adapter weights: {detail}")
+
+    def _iter_candidate_checkpoint_paths(self) -> tuple[Path, ...]:
+        compact_checkpoint_path = self._compact_checkpoint_path()
+        adapter_checkpoint_path = Path(self.adapter_path)
+        candidates: list[Path] = []
+        if compact_checkpoint_path.is_file():
+            candidates.append(compact_checkpoint_path)
+        if (
+            adapter_checkpoint_path != compact_checkpoint_path
+            and adapter_checkpoint_path.is_file()
+        ):
+            candidates.append(adapter_checkpoint_path)
+        if not candidates:
+            candidates.append(self._resolve_checkpoint_path())
+        return tuple(candidates)
+
+    def _resolve_checkpoint_path(self) -> Path:
+        compact_checkpoint_path = self._compact_checkpoint_path()
+        if compact_checkpoint_path.is_file():
+            return compact_checkpoint_path
+        return Path(self.adapter_path)
+
+    def _compact_checkpoint_path(self) -> Path:
+        adapter_path = Path(self.adapter_path)
+        suffix = "".join(adapter_path.suffixes) or ".pth"
+        if suffix == ".adapter_only.pth":
+            return adapter_path
+        stem = adapter_path.name
+        if suffix:
+            stem = stem[: -len(suffix)]
+        return adapter_path.with_name(f"{stem}.adapter_only.pth")
+
+    @staticmethod
+    def _torch_load_checkpoint(checkpoint_path: Path) -> object:
+        import torch
+
+        try:
+            return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        except TypeError:
+            return torch.load(checkpoint_path, map_location="cpu")
+        except Exception:
+            return torch.load(checkpoint_path, map_location="cpu")
 
     @classmethod
     def _extract_adapter_state_dict(
@@ -529,33 +624,6 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                 nested = candidate.get(key)
                 if isinstance(nested, dict):
                     stack.append(nested)
-
-    def _resolve_checkpoint_path(self) -> Path:
-        compact_checkpoint_path = self._compact_checkpoint_path()
-        if compact_checkpoint_path.is_file():
-            return compact_checkpoint_path
-        return Path(self.adapter_path)
-
-    def _compact_checkpoint_path(self) -> Path:
-        adapter_path = Path(self.adapter_path)
-        suffix = "".join(adapter_path.suffixes) or ".pth"
-        if suffix == ".adapter_only.pth":
-            return adapter_path
-        stem = adapter_path.name
-        if suffix:
-            stem = stem[: -len(suffix)]
-        return adapter_path.with_name(f"{stem}.adapter_only.pth")
-
-    @staticmethod
-    def _torch_load_checkpoint(checkpoint_path: Path) -> object:
-        import torch
-
-        try:
-            return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        except TypeError:
-            return torch.load(checkpoint_path, map_location="cpu")
-        except Exception:
-            return torch.load(checkpoint_path, map_location="cpu")
 
     @staticmethod
     def _torch_save_checkpoint(checkpoint_path: Path, payload: dict[str, object]) -> None:
