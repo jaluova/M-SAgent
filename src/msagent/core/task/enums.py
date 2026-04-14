@@ -4,7 +4,7 @@
 帮助任务状态在整个系统内保持统一表达。
 """
 
-from enum import StrEnum
+from msagent.core.enum_compat import StrEnum
 
 
 class TaskSource(StrEnum):
@@ -46,4 +46,3 @@ class StopReason(StrEnum):
     EMPTY_PROPOSAL = "empty_proposal"
     UNRECOVERABLE_ERROR = "unrecoverable_error"
     MANUAL_STOP = "manual_stop"
-

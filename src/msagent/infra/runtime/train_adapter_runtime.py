@@ -1,8 +1,10 @@
-"""Train adapter / embedded locate 的底层 runtime 骨架。"""
+"""Train adapter / embedded locate 的底层 runtime。"""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from msagent.core.contracts.common import ImageRef
 from msagent.core.contracts.types import NormalizedBox
@@ -97,17 +99,27 @@ class SharedBackboneTrainAdapterRuntime(TrainAdapterRuntime):
     """
 
     backbone_provider: SharedQwenBackboneProvider
-    instruction_prefix: str = "Locate the referent described as"
+    instruction_prefix: str = "Given the grid coordinate system, locate the referent described as"
+    instruction_suffix: str = "in the image and predict the most likely target points."
 
     def build_instruction(self, request: TrainAdapterRuntimeRequest) -> str:
         """构造运行时消费的文本指令。"""
+        base_instruction = (
+            f"{self.instruction_prefix} '{request.query_text}' "
+            f"{self.instruction_suffix}"
+        )
         focus_terms = ", ".join(request.focus_terms)
         if focus_terms:
-            return (
-                f"{self.instruction_prefix} '{request.query_text}'. "
-                f"Focus on: {focus_terms}."
-            )
-        return f"{self.instruction_prefix} '{request.query_text}'."
+            return f"{base_instruction} Focus on: {focus_terms}."
+        return base_instruction
+
+    def resolve_text_max_length(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ) -> int | None:
+        """返回文本编码阶段使用的最大长度。"""
+        del request
+        return None
 
     def prepare_feature_context(
         self,
@@ -120,10 +132,491 @@ class SharedBackboneTrainAdapterRuntime(TrainAdapterRuntime):
             metadata={"runtime_name": self.runtime_name},
         )
         instruction_text = self.build_instruction(request)
-        return SharedBackboneFeatureContext(
-            backbone=backbone,
-            session=session,
-            image_features=backbone.encode_image(request.image_ref, session=session),
-            text_features=backbone.encode_text(instruction_text, session=session),
-            instruction_text=instruction_text,
+        try:
+            image_features = backbone.encode_image(request.image_ref, session=session)
+            text_features = backbone.encode_text(
+                instruction_text,
+                session=session,
+                max_length=self.resolve_text_max_length(request),
+            )
+            return SharedBackboneFeatureContext(
+                backbone=backbone,
+                session=session,
+                image_features=image_features,
+                text_features=text_features,
+                instruction_text=instruction_text,
+            )
+        except Exception:
+            backbone.release_session(session)
+            raise
+
+
+@dataclass(slots=True)
+class EmbeddedGridGroundRuntimeConfig:
+    """embedded GridGround runtime 的最小配置。"""
+
+    adapter_type: str = "lightweight"
+    visual_dim: int = 768
+    grid_feature_dim: int = 256
+    hidden_dim: int = 256
+    num_heads: int = 4
+    num_grid_tokens: int = 25
+    num_output_points: int = 4
+    dropout: float = 0.1
+    grid_size: int = 11
+    max_length: int = 512
+    abs_threshold: float = 0.50
+    rel_ratio: float = 0.75
+    min_k: int = 1
+    max_k: int = 3
+    min_point_confidence: float = 0.0
+    box_margin_ratio: float = 0.12
+
+    @classmethod
+    def from_json_file(
+        cls,
+        path: str | Path,
+        *,
+        abs_threshold: float = 0.50,
+        rel_ratio: float = 0.75,
+        min_k: int = 1,
+        max_k: int = 3,
+        min_point_confidence: float = 0.0,
+        box_margin_ratio: float = 0.12,
+    ) -> "EmbeddedGridGroundRuntimeConfig":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        model = payload.get("model", {})
+        data = payload.get("data", {})
+        return cls(
+            adapter_type=model.get("adapter_type", cls.adapter_type),
+            visual_dim=int(model.get("visual_dim", cls.visual_dim)),
+            grid_feature_dim=int(model.get("grid_feature_dim", cls.grid_feature_dim)),
+            hidden_dim=int(model.get("hidden_dim", cls.hidden_dim)),
+            num_heads=int(model.get("num_heads", cls.num_heads)),
+            num_grid_tokens=int(model.get("num_grid_tokens", cls.num_grid_tokens)),
+            num_output_points=int(model.get("num_output_points", cls.num_output_points)),
+            dropout=float(model.get("dropout", cls.dropout)),
+            grid_size=int(model.get("grid_size", cls.grid_size)),
+            max_length=int(data.get("max_length", cls.max_length)),
+            abs_threshold=abs_threshold,
+            rel_ratio=rel_ratio,
+            min_k=min_k,
+            max_k=max_k,
+            min_point_confidence=min_point_confidence,
+            box_margin_ratio=box_margin_ratio,
         )
+
+
+@dataclass(slots=True, kw_only=True)
+class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
+    """shared Qwen + embedded locate 的最小真实 runtime。"""
+
+    adapter_path: str
+    config_path: str
+    runtime_config: EmbeddedGridGroundRuntimeConfig
+    _adapter_module: object | None = field(default=None, init=False, repr=False)
+
+    @classmethod
+    def from_files(
+        cls,
+        *,
+        runtime_name: str,
+        backbone_provider: SharedQwenBackboneProvider,
+        adapter_path: str | Path,
+        config_path: str | Path,
+        abs_threshold: float = 0.50,
+        rel_ratio: float = 0.75,
+        min_k: int = 1,
+        max_k: int = 3,
+        min_point_confidence: float = 0.0,
+        box_margin_ratio: float = 0.12,
+    ) -> "EmbeddedGridGroundTrainAdapterRuntime":
+        config_path = str(Path(config_path).expanduser())
+        return cls(
+            runtime_name=runtime_name,
+            backbone_provider=backbone_provider,
+            adapter_path=str(Path(adapter_path).expanduser()),
+            config_path=config_path,
+            runtime_config=EmbeddedGridGroundRuntimeConfig.from_json_file(
+                config_path,
+                abs_threshold=abs_threshold,
+                rel_ratio=rel_ratio,
+                min_k=min_k,
+                max_k=max_k,
+                min_point_confidence=min_point_confidence,
+                box_margin_ratio=box_margin_ratio,
+            ),
+        )
+
+    def predict_embedded_locate(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ) -> EmbeddedLocatePrediction:
+        import torch
+
+        context: SharedBackboneFeatureContext | None = None
+        try:
+            context = self.prepare_feature_context(request)
+            adapter = self._get_or_load_adapter(context.backbone)
+            image_payload = context.backbone.resolve_feature(context.image_features)
+            text_payload = context.backbone.resolve_feature(context.text_features)
+            image_tensor, grid_image_tensor = self._preprocess_image(request.image_ref)
+
+            adapter_device = next(adapter.parameters()).device
+            adapter_dtype = next(adapter.parameters()).dtype
+            visual_features = image_payload.tensor.to(device=adapter_device, dtype=adapter_dtype)
+            text_features = text_payload.tensor.to(device=adapter_device, dtype=adapter_dtype)
+            attention_mask = (
+                text_payload.attention_mask.to(device=adapter_device)
+                if text_payload.attention_mask is not None
+                else None
+            )
+            image_tensor = image_tensor.to(device=adapter_device, dtype=adapter_dtype)
+            grid_image_tensor = grid_image_tensor.to(device=adapter_device, dtype=adapter_dtype)
+
+            with torch.no_grad():
+                enhanced = adapter(
+                    image_tensor,
+                    grid_image_tensor,
+                    visual_features,
+                    text_features=text_features,
+                    text_attention_mask=attention_mask,
+                )
+                grid_logits = adapter.predict_grid_logits(
+                    enhanced,
+                    text_features=text_features,
+                    attention_mask=attention_mask,
+                )
+                selected = adapter.decode_grid_logits_dynamic(
+                    grid_logits,
+                    abs_threshold=self._resolve_float_option(
+                        request.options,
+                        "abs_threshold",
+                        self.runtime_config.abs_threshold,
+                    ),
+                    rel_ratio=self._resolve_float_option(
+                        request.options,
+                        "rel_ratio",
+                        self.runtime_config.rel_ratio,
+                    ),
+                    min_k=self._resolve_int_option(
+                        request.options,
+                        "min_k",
+                        self.runtime_config.min_k,
+                    ),
+                    max_k=self._resolve_int_option(
+                        request.options,
+                        "max_k",
+                        self.runtime_config.max_k,
+                    ),
+                )
+
+            selected_points = selected["selected_points"][0].detach().cpu()
+            selected_scores = selected["selected_scores"][0].detach().cpu()
+            point_conf_threshold = self._resolve_float_option(
+                request.options,
+                "min_point_confidence",
+                self.runtime_config.min_point_confidence,
+            )
+            points: list[EmbeddedLocatePoint] = []
+            for idx, (point, score) in enumerate(zip(selected_points, selected_scores), start=1):
+                confidence = round(float(score), 4)
+                if confidence < point_conf_threshold:
+                    continue
+                points.append(
+                    EmbeddedLocatePoint(
+                        x=round(float(point[0]), 4),
+                        y=round(float(point[1]), 4),
+                        confidence=confidence,
+                        reason=f"grid_peak_{idx}",
+                    )
+                )
+
+            diagnostics = [
+                f"selected_k={len(points)}",
+                f"feature_session={context.session.session_id}",
+            ]
+            if not points:
+                diagnostics.append("no_points_after_runtime_filter")
+                return EmbeddedLocatePrediction(
+                    runtime_name=self.runtime_name,
+                    diagnostics=diagnostics,
+                    metadata={
+                        "adapter_path": self.adapter_path,
+                        "config_path": self.config_path,
+                        "backbone": context.backbone.backbone_name,
+                    },
+                    limitations=["runtime produced no point above confidence threshold"],
+                )
+
+            coarse_box = self._build_coarse_box(points)
+            limitations: list[str] = []
+            bridge_hints: list[EmbeddedLocateBridgeHint] = []
+            if coarse_box is not None:
+                limitations.append("coarse_box derived from selected point envelope")
+                bridge_hints.append(
+                    EmbeddedLocateBridgeHint(
+                        hint_type="prefer_box_plus_points",
+                        reason="embedded runtime produced both point priors and a derived coarse box",
+                    )
+                )
+            return EmbeddedLocatePrediction(
+                runtime_name=self.runtime_name,
+                points=points,
+                coarse_box=coarse_box,
+                bridge_hints=bridge_hints,
+                diagnostics=diagnostics,
+                metadata={
+                    "adapter_path": self.adapter_path,
+                    "config_path": self.config_path,
+                    "adapter_type": self.runtime_config.adapter_type,
+                    "backbone": context.backbone.backbone_name,
+                    "device": str(adapter_device),
+                    "instruction_text": context.instruction_text,
+                },
+                limitations=limitations,
+            )
+        finally:
+            if context is not None:
+                context.backbone.release_session(context.session)
+
+    def resolve_text_max_length(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ) -> int | None:
+        del request
+        return self.runtime_config.max_length
+
+    def _get_or_load_adapter(self, backbone: SharedVisionLanguageBackbone) -> object:
+        import torch
+
+        from msagent.infra.runtime.embedded_gridground_adapter import (
+            CoordinateAdapter,
+            LightweightCoordinateAdapter,
+        )
+
+        if self._adapter_module is None:
+            self._align_runtime_config_with_backbone(backbone)
+            adapter_kwargs = dict(
+                visual_dim=self.runtime_config.visual_dim,
+                grid_feature_dim=self.runtime_config.grid_feature_dim,
+                hidden_dim=self.runtime_config.hidden_dim,
+                num_heads=self.runtime_config.num_heads,
+                num_grid_tokens=self.runtime_config.num_grid_tokens,
+                num_output_points=self.runtime_config.num_output_points,
+                dropout=self.runtime_config.dropout,
+                grid_size=self.runtime_config.grid_size,
+            )
+            adapter_cls = (
+                LightweightCoordinateAdapter
+                if self.runtime_config.adapter_type == "lightweight"
+                else CoordinateAdapter
+            )
+            adapter = adapter_cls(**adapter_kwargs)
+            state_dict = self._load_adapter_state_dict(
+                target_keys=set(adapter.state_dict().keys())
+            )
+            missing_keys, unexpected_keys = adapter.load_state_dict(state_dict, strict=False)
+            if missing_keys:
+                raise RuntimeError(f"Embedded runtime missing keys: {missing_keys}")
+            if unexpected_keys:
+                raise RuntimeError(f"Embedded runtime unexpected keys: {unexpected_keys}")
+            adapter.eval()
+            self._adapter_module = adapter
+
+        visual_device = backbone.visual_device() if hasattr(backbone, "visual_device") else backbone.device
+        self._adapter_module.to(device=visual_device)
+        return self._adapter_module
+
+    def _load_adapter_state_dict(self, *, target_keys: set[str]) -> dict[str, object]:
+        checkpoint_path = self._resolve_checkpoint_path()
+        checkpoint = self._torch_load_checkpoint(checkpoint_path)
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        if not isinstance(state_dict, dict):
+            raise RuntimeError("GridGround checkpoint does not contain a loadable state_dict")
+
+        normalized = {}
+        for key, value in state_dict.items():
+            normalized_key = self._normalize_state_key(key)
+            if normalized_key in target_keys:
+                normalized[normalized_key] = value
+        if not normalized:
+            raise RuntimeError(
+                f"No adapter weights matched the embedded runtime checkpoint: {checkpoint_path}"
+            )
+        compact_checkpoint_path = self._compact_checkpoint_path()
+        if checkpoint_path != compact_checkpoint_path:
+            try:
+                self._torch_save_checkpoint(compact_checkpoint_path, normalized)
+            except Exception:
+                pass
+        return normalized
+
+    def _resolve_checkpoint_path(self) -> Path:
+        compact_checkpoint_path = self._compact_checkpoint_path()
+        if compact_checkpoint_path.is_file():
+            return compact_checkpoint_path
+        return Path(self.adapter_path)
+
+    def _compact_checkpoint_path(self) -> Path:
+        adapter_path = Path(self.adapter_path)
+        suffix = "".join(adapter_path.suffixes) or ".pth"
+        if suffix == ".adapter_only.pth":
+            return adapter_path
+        stem = adapter_path.name
+        if suffix:
+            stem = stem[: -len(suffix)]
+        return adapter_path.with_name(f"{stem}.adapter_only.pth")
+
+    @staticmethod
+    def _torch_load_checkpoint(checkpoint_path: Path) -> object:
+        import torch
+
+        try:
+            return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        except TypeError:
+            return torch.load(checkpoint_path, map_location="cpu")
+        except Exception:
+            return torch.load(checkpoint_path, map_location="cpu")
+
+    @staticmethod
+    def _torch_save_checkpoint(checkpoint_path: Path, payload: dict[str, object]) -> None:
+        import torch
+
+        torch.save(payload, checkpoint_path)
+
+    @staticmethod
+    def _normalize_state_key(key: str) -> str:
+        prefixes = (
+            "module.adapter.",
+            "adapter.",
+            "module.",
+            "model.adapter.",
+            "model.",
+        )
+        normalized = key
+        changed = True
+        while changed:
+            changed = False
+            for prefix in prefixes:
+                if normalized.startswith(prefix):
+                    normalized = normalized[len(prefix):]
+                    changed = True
+        return normalized
+
+    def _align_runtime_config_with_backbone(self, backbone: SharedVisionLanguageBackbone) -> None:
+        backbone_dim = getattr(backbone, "text_dim", None) or getattr(backbone, "visual_dim", None)
+        if backbone_dim and int(backbone_dim) != int(self.runtime_config.visual_dim):
+            self.runtime_config.visual_dim = int(backbone_dim)
+
+    def _preprocess_image(self, image_ref: ImageRef) -> tuple[object, object]:
+        from PIL import Image
+        from torchvision import transforms
+
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ]
+        )
+        image_path = self._resolve_image_path(image_ref)
+        with Image.open(image_path) as image:
+            rgb_image = image.convert("RGB")
+            image_tensor = transform(rgb_image).unsqueeze(0)
+            grid_image_tensor = transform(self._build_grid_image(rgb_image)).unsqueeze(0)
+        return image_tensor, grid_image_tensor
+
+    def _build_grid_image(self, image: Image.Image) -> Image.Image:
+        from PIL import Image, ImageDraw
+
+        width, height = image.size
+        border_size = 28
+        grid_image = Image.new("RGB", (width + border_size * 2, height + border_size * 2), "white")
+        grid_image.paste(image, (border_size, border_size))
+        draw = ImageDraw.Draw(grid_image)
+        grid_font = self._load_font(15, bold=False)
+        for index in range(self.runtime_config.grid_size):
+            x = border_size + index * (width / max(self.runtime_config.grid_size - 1, 1))
+            y = border_size + index * (height / max(self.runtime_config.grid_size - 1, 1))
+            draw.line([(x, border_size), (x, border_size + height)], fill="black", width=1)
+            draw.line([(border_size, y), (border_size + width, y)], fill="black", width=1)
+            label = str(index)
+            bbox = draw.textbbox((0, 0), label, font=grid_font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            draw.text((x - text_w / 2, border_size - text_h - 5), label, fill="black", font=grid_font)
+            draw.text((border_size - text_w - 5, y - text_h / 2), label, fill="black", font=grid_font)
+        return grid_image
+
+    @staticmethod
+    def _load_font(size: int, *, bold: bool) -> object:
+        from PIL import ImageFont
+
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+            if bold
+            else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        ]
+        for path in candidates:
+            candidate = Path(path)
+            if not candidate.exists():
+                continue
+            try:
+                return ImageFont.truetype(str(candidate), size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    def _build_coarse_box(
+        self,
+        points: list[EmbeddedLocatePoint],
+    ) -> NormalizedBox | None:
+        if not points:
+            return None
+        xs = [point.x for point in points]
+        ys = [point.y for point in points]
+        margin = max(
+            self.runtime_config.box_margin_ratio,
+            1.0 / max(self.runtime_config.grid_size - 1, 1),
+        )
+        return NormalizedBox(
+            x1=max(0.0, min(xs) - margin),
+            y1=max(0.0, min(ys) - margin),
+            x2=min(1.0, max(xs) + margin),
+            y2=min(1.0, max(ys) + margin),
+        )
+
+    @staticmethod
+    def _resolve_image_path(image_ref: ImageRef) -> Path:
+        uri = image_ref.uri
+        if uri.startswith("file://"):
+            return Path(uri[7:]).expanduser()
+        return Path(uri).expanduser()
+
+    @staticmethod
+    def _resolve_float_option(
+        options: dict[str, object],
+        key: str,
+        default: float,
+    ) -> float:
+        value = options.get(key)
+        if value is None:
+            return float(default)
+        return float(value)
+
+    @staticmethod
+    def _resolve_int_option(
+        options: dict[str, object],
+        key: str,
+        default: int,
+    ) -> int:
+        value = options.get(key)
+        if value is None:
+            return int(default)
+        return int(value)

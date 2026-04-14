@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 
 from msagent.core.contracts.common import ArtifactRef
+from msagent.core.enum_compat import StrEnum
 
 
 class SegmentationStatus(StrEnum):
@@ -39,4 +39,3 @@ class SegmentationResult:
     primary_candidate_id: str | None = None
     prompt_package_ref: ArtifactRef | None = None
     diagnostics: list[str] = field(default_factory=list)
-

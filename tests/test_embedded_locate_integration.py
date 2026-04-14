@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,8 @@ from msagent.infra.embedded_locator import EmbeddedLocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
 from msagent.infra.mock_adapters import MockLLMAdapter, MockSAMAdapter
 from msagent.infra.runtime.train_adapter_runtime import (
+    EmbeddedGridGroundRuntimeConfig,
+    EmbeddedGridGroundTrainAdapterRuntime,
     EmbeddedLocateBridgeHint,
     EmbeddedLocatePoint,
     EmbeddedLocatePrediction,
@@ -82,6 +85,8 @@ class FakeSharedBackbone(SharedVisionLanguageBackbone):
         self.session_handles: list[FeatureSessionHandle] = []
         self.image_calls: list[tuple[ImageRef, str | None]] = []
         self.text_calls: list[tuple[str, str | None]] = []
+        self.text_max_lengths: list[int | None] = []
+        self.released_sessions: list[str] = []
 
     def open_feature_session(
         self,
@@ -115,8 +120,10 @@ class FakeSharedBackbone(SharedVisionLanguageBackbone):
         text: str,
         *,
         session: FeatureSessionHandle | None = None,
+        max_length: int | None = None,
     ) -> EncodedFeatureHandle:
         self.text_calls.append((text, session.session_id if session else None))
+        self.text_max_lengths.append(max_length)
         return EncodedFeatureHandle(
             feature_id=f"text::{len(self.text_calls)}",
             feature_kind="text",
@@ -126,6 +133,9 @@ class FakeSharedBackbone(SharedVisionLanguageBackbone):
             hidden_dim=1024,
             metadata={"text": text},
         )
+
+    def release_session(self, session: FeatureSessionHandle) -> None:
+        self.released_sessions.append(session.session_id)
 
 
 class FakeSharedQwenProvider(SharedQwenBackboneProvider):
@@ -182,6 +192,35 @@ class FakeEmbeddedTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
             },
             limitations=["fake_runtime_for_tests"],
         )
+
+
+class ConfiguredFakeEmbeddedTrainAdapterRuntime(FakeEmbeddedTrainAdapterRuntime):
+    def __init__(self, backbone_provider: SharedQwenBackboneProvider, *, max_length: int) -> None:
+        super().__init__(backbone_provider)
+        self.max_length = max_length
+
+    def resolve_text_max_length(self, request: TrainAdapterRuntimeRequest) -> int | None:
+        del request
+        return self.max_length
+
+
+class FailingTextSharedBackbone(FakeSharedBackbone):
+    def encode_text(
+        self,
+        text: str,
+        *,
+        session: FeatureSessionHandle | None = None,
+        max_length: int | None = None,
+    ) -> EncodedFeatureHandle:
+        self.text_calls.append((text, session.session_id if session else None))
+        self.text_max_lengths.append(max_length)
+        raise RuntimeError("text_encode_failed")
+
+
+class FailingTextSharedQwenProvider(FakeSharedQwenProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = FailingTextSharedBackbone()
 
 
 class DiagnosticEmptyLocatorAdapter(LocatorAdapter):
@@ -353,7 +392,111 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(runtime.last_request)
         assert runtime.last_request is not None
         self.assertEqual(runtime.last_request.image_ref.uri, "/tmp/input.png")
-        self.assertIn("the small red cup", runtime.last_instruction_text or "")
+        self.assertEqual(
+            runtime.last_instruction_text,
+            (
+                "Given the grid coordinate system, locate the referent described as "
+                "'the small red cup' in the image and predict the most likely target points. "
+                "Focus on: small, red, cup."
+            ),
+        )
+
+    def test_prepare_feature_context_releases_session_on_encode_failure(self) -> None:
+        provider = FailingTextSharedQwenProvider()
+        runtime = FakeEmbeddedTrainAdapterRuntime(provider)
+
+        with self.assertRaisesRegex(RuntimeError, "text_encode_failed"):
+            runtime.prepare_feature_context(
+                TrainAdapterRuntimeRequest(
+                    task_id="task-prepare-failure",
+                    image_ref=ImageRef(uri="/tmp/input.png"),
+                    query_text="the small red cup",
+                    focus_terms=["small", "red", "cup"],
+                )
+            )
+
+        self.assertEqual(len(provider.backbone.session_handles), 1)
+        self.assertEqual(
+            provider.backbone.released_sessions,
+            [provider.backbone.session_handles[0].session_id],
+        )
+
+    def test_prepare_feature_context_passes_runtime_max_length_to_backbone(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = ConfiguredFakeEmbeddedTrainAdapterRuntime(provider, max_length=384)
+
+        context = runtime.prepare_feature_context(
+            TrainAdapterRuntimeRequest(
+                task_id="task-max-length",
+                image_ref=ImageRef(uri="/tmp/input.png"),
+                query_text="the small red cup",
+                focus_terms=["small", "red", "cup"],
+            )
+        )
+
+        self.assertEqual(provider.backbone.text_max_lengths, [384])
+        self.assertEqual(
+            context.instruction_text,
+            (
+                "Given the grid coordinate system, locate the referent described as "
+                "'the small red cup' in the image and predict the most likely target points. "
+                "Focus on: small, red, cup."
+            ),
+        )
+        provider.backbone.release_session(context.session)
+
+    def test_checkpoint_loader_prefers_adapter_only_sidecar(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-checkpoint-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        with mock.patch(
+            "pathlib.Path.is_file",
+            autospec=True,
+            side_effect=lambda path: str(path).endswith(".adapter_only.pth"),
+        ), mock.patch(
+            "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_load_checkpoint",
+            return_value={"adapter.layer": "value"},
+        ) as mocked_torch_load:
+            result = runtime._load_adapter_state_dict(target_keys={"layer"})
+
+        self.assertEqual(result, {"layer": "value"})
+        load_path = mocked_torch_load.call_args.args[0]
+        self.assertEqual(str(load_path), "/tmp/best_model.adapter_only.pth")
+
+    def test_checkpoint_loader_caches_filtered_adapter_state(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-checkpoint-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        with mock.patch(
+            "pathlib.Path.is_file",
+            autospec=True,
+            return_value=False,
+        ), mock.patch(
+            "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_load_checkpoint",
+            return_value={"model_state_dict": {"module.adapter.layer": "value", "ignored": "noise"}},
+        ) as mocked_torch_load, mock.patch(
+            "msagent.infra.runtime.train_adapter_runtime.EmbeddedGridGroundTrainAdapterRuntime._torch_save_checkpoint"
+        ) as mocked_torch_save:
+            result = runtime._load_adapter_state_dict(target_keys={"layer"})
+
+        self.assertEqual(result, {"layer": "value"})
+        mocked_torch_load.assert_called_once()
+        mocked_torch_save.assert_called_once()
+        save_path, saved_state_dict = mocked_torch_save.call_args.args
+        self.assertEqual(saved_state_dict, {"layer": "value"})
+        self.assertEqual(str(save_path), "/tmp/best_model.adapter_only.pth")
 
     def test_proposal_engine_runs_through_embedded_locator(self) -> None:
         with TemporaryDirectory() as tmp_dir:

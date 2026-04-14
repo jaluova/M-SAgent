@@ -35,6 +35,15 @@ class EncodedFeatureHandle:
 
 
 @dataclass(slots=True)
+class ResolvedFeaturePayload:
+    """infra 内部消费的特征载荷。"""
+
+    tensor: object
+    attention_mask: object | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SharedVisionLanguageBackbone:
     """共享视觉语言骨干的最小接口骨架。"""
 
@@ -70,9 +79,18 @@ class SharedVisionLanguageBackbone:
         text: str,
         *,
         session: FeatureSessionHandle | None = None,
+        max_length: int | None = None,
     ) -> EncodedFeatureHandle:
         """编码文本，返回受控特征句柄。"""
         raise NotImplementedError
+
+    def resolve_feature(self, handle: EncodedFeatureHandle) -> ResolvedFeaturePayload:
+        """按句柄取回 runtime 内部使用的特征载荷。"""
+        raise NotImplementedError
+
+    def release_session(self, session: FeatureSessionHandle) -> None:
+        """释放会话相关缓存。"""
+        return None
 
 
 @dataclass(slots=True)

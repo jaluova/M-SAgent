@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+
+from msagent.core.enum_compat import StrEnum
 
 
 class TargetType(StrEnum):
@@ -111,4 +112,3 @@ class QueryUnderstandingResult:
     bridge_hints: list[QueryBridgeHint] = field(default_factory=list)
     confidence: float | None = None
     notes: list[str] = field(default_factory=list)
-

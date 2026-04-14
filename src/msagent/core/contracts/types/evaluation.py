@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 
 from msagent.core.contracts.common import ArtifactRef
+from msagent.core.enum_compat import StrEnum
 
 
 class EvaluationVerdict(StrEnum):
@@ -47,4 +47,3 @@ class EvaluationResult:
     confidence: float | None = None
     issues: list[EvaluationIssue] = field(default_factory=list)
     retry_hints: list[str] = field(default_factory=list)
-

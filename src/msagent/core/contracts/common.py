@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Generic, TypeVar
 
+from msagent.core.enum_compat import StrEnum
 from msagent.core.trace.models import TraceContext
 
 ModulePayloadT = TypeVar("ModulePayloadT")
