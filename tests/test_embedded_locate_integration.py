@@ -170,28 +170,28 @@ class FakeEmbeddedTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
         request: TrainAdapterRuntimeRequest,
     ) -> EmbeddedLocatePrediction:
         self.last_request = request
-        context = self.prepare_feature_context(request)
-        self.last_instruction_text = context.instruction_text
-        return EmbeddedLocatePrediction(
-            runtime_name=self.runtime_name,
-            points=[
-                EmbeddedLocatePoint(x=0.36, y=0.47, confidence=0.93, reason="peak_1"),
-                EmbeddedLocatePoint(x=0.44, y=0.58, confidence=0.81, reason="peak_2"),
-            ],
-            coarse_box=NormalizedBox(x1=0.22, y1=0.19, x2=0.63, y2=0.78),
-            bridge_hints=[
-                EmbeddedLocateBridgeHint(
-                    hint_type="prefer_box_plus_points",
-                    reason="runtime produced both coarse box and point priors",
-                )
-            ],
-            diagnostics=[f"session={context.session.session_id}"],
-            metadata={
-                "backbone": context.backbone.backbone_name,
-                "device": context.backbone.device,
-            },
-            limitations=["fake_runtime_for_tests"],
-        )
+        with self.feature_context(request) as context:
+            self.last_instruction_text = context.instruction_text
+            return EmbeddedLocatePrediction(
+                runtime_name=self.runtime_name,
+                points=[
+                    EmbeddedLocatePoint(x=0.36, y=0.47, confidence=0.93, reason="peak_1"),
+                    EmbeddedLocatePoint(x=0.44, y=0.58, confidence=0.81, reason="peak_2"),
+                ],
+                coarse_box=NormalizedBox(x1=0.22, y1=0.19, x2=0.63, y2=0.78),
+                bridge_hints=[
+                    EmbeddedLocateBridgeHint(
+                        hint_type="prefer_box_plus_points",
+                        reason="runtime produced both coarse box and point priors",
+                    )
+                ],
+                diagnostics=[f"session={context.session.session_id}"],
+                metadata={
+                    "backbone": context.backbone.backbone_name,
+                    "device": context.backbone.device,
+                },
+                limitations=["fake_runtime_for_tests"],
+            )
 
 
 class ConfiguredFakeEmbeddedTrainAdapterRuntime(FakeEmbeddedTrainAdapterRuntime):
@@ -221,6 +221,16 @@ class FailingTextSharedQwenProvider(FakeSharedQwenProvider):
     def __init__(self) -> None:
         super().__init__()
         self.backbone = FailingTextSharedBackbone()
+
+
+class ReleaseTrackingSharedBackbone(FakeSharedBackbone):
+    pass
+
+
+class ReleaseTrackingSharedQwenProvider(FakeSharedQwenProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = ReleaseTrackingSharedBackbone()
 
 
 class DiagnosticEmptyLocatorAdapter(LocatorAdapter):
@@ -445,6 +455,102 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         )
         provider.backbone.release_session(context.session)
 
+    def test_feature_context_releases_session_on_downstream_failure(self) -> None:
+        provider = ReleaseTrackingSharedQwenProvider()
+        runtime = FakeEmbeddedTrainAdapterRuntime(provider)
+
+        with self.assertRaisesRegex(RuntimeError, "downstream_failed"):
+            with runtime.feature_context(
+                TrainAdapterRuntimeRequest(
+                    task_id="task-downstream-failure",
+                    image_ref=ImageRef(uri="/tmp/input.png"),
+                    query_text="the small red cup",
+                    focus_terms=["small", "red", "cup"],
+                )
+            ):
+                raise RuntimeError("downstream_failed")
+
+        self.assertEqual(len(provider.backbone.session_handles), 1)
+        self.assertEqual(
+            provider.backbone.released_sessions,
+            [provider.backbone.session_handles[0].session_id],
+        )
+
+    def test_embedded_runtime_instruction_defaults_to_legacy_predictor_text(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-instruction-default",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        instruction = runtime.build_instruction(
+            TrainAdapterRuntimeRequest(
+                task_id="task-default-instruction",
+                image_ref=ImageRef(uri="/tmp/input.png"),
+                query_text="the small red cup",
+                focus_terms=["small", "red", "cup"],
+            )
+        )
+
+        self.assertEqual(
+            instruction,
+            (
+                "Given the grid coordinate system, locate the referent described as "
+                "'the small red cup' in the image and predict the most likely target points."
+            ),
+        )
+
+    def test_embedded_runtime_instruction_can_be_overridden_by_runtime_config(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-instruction-custom",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(
+                max_length=384,
+                instruction_template="Locate '{query_text}' on the grid.",
+                focus_terms_template="Focus terms: {focus_terms}.",
+            ),
+        )
+
+        instruction = runtime.build_instruction(
+            TrainAdapterRuntimeRequest(
+                task_id="task-custom-instruction",
+                image_ref=ImageRef(uri="/tmp/input.png"),
+                query_text="the small red cup",
+                focus_terms=["small", "red", "cup"],
+            )
+        )
+
+        self.assertEqual(
+            instruction,
+            "Locate 'the small red cup' on the grid. Focus terms: small, red, cup.",
+        )
+
+    def test_embedded_runtime_resolve_text_max_length_comes_from_runtime_config(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-max-length",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=640),
+        )
+
+        max_length = runtime.resolve_text_max_length(
+            TrainAdapterRuntimeRequest(
+                task_id="task-runtime-max-length",
+                image_ref=ImageRef(uri="/tmp/input.png"),
+                query_text="the small red cup",
+            )
+        )
+
+        self.assertEqual(max_length, 640)
+
     def test_checkpoint_loader_prefers_adapter_only_sidecar(self) -> None:
         provider = FakeSharedQwenProvider()
         runtime = EmbeddedGridGroundTrainAdapterRuntime(
@@ -497,6 +603,82 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         save_path, saved_state_dict = mocked_torch_save.call_args.args
         self.assertEqual(saved_state_dict, {"layer": "value"})
         self.assertEqual(str(save_path), "/tmp/best_model.adapter_only.pth")
+
+    def test_checkpoint_loader_accepts_nested_state_dict_container(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-checkpoint-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        checkpoint = {
+            "epoch": 12,
+            "state_dict": {
+                "module.adapter.layer": "value",
+                "module.adapter.other": "value-2",
+            },
+        }
+
+        result = runtime._extract_adapter_state_dict(
+            checkpoint,
+            target_keys={"layer", "other"},
+        )
+
+        self.assertEqual(result, {"layer": "value", "other": "value-2"})
+
+    def test_checkpoint_loader_accepts_nested_adapter_state_dict(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-checkpoint-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        checkpoint = {
+            "metadata": {"source": "legacy"},
+            "adapter_state_dict": {
+                "adapter.layer": "value",
+            },
+        }
+
+        result = runtime._extract_adapter_state_dict(
+            checkpoint,
+            target_keys={"layer"},
+        )
+
+        self.assertEqual(result, {"layer": "value"})
+
+    def test_checkpoint_loader_prefers_candidate_with_more_matching_keys(self) -> None:
+        provider = FakeSharedQwenProvider()
+        runtime = EmbeddedGridGroundTrainAdapterRuntime(
+            runtime_name="embedded-runtime-checkpoint-test",
+            backbone_provider=provider,
+            adapter_path="/tmp/best_model.pth",
+            config_path="/tmp/config.json",
+            runtime_config=EmbeddedGridGroundRuntimeConfig(max_length=384),
+        )
+
+        checkpoint = {
+            "model_state_dict": {
+                "module.adapter.layer": "value",
+                "module.adapter.other": "value-2",
+            },
+            "state_dict": {
+                "module.adapter.layer": "stale",
+            },
+        }
+
+        result = runtime._extract_adapter_state_dict(
+            checkpoint,
+            target_keys={"layer", "other"},
+        )
+
+        self.assertEqual(result, {"layer": "value", "other": "value-2"})
 
     def test_proposal_engine_runs_through_embedded_locator(self) -> None:
         with TemporaryDirectory() as tmp_dir:

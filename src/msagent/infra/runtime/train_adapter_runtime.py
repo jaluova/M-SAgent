@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,6 +151,18 @@ class SharedBackboneTrainAdapterRuntime(TrainAdapterRuntime):
             backbone.release_session(session)
             raise
 
+    @contextmanager
+    def feature_context(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ):
+        """以显式生命周期包装共享骨干特征上下文。"""
+        context = self.prepare_feature_context(request)
+        try:
+            yield context
+        finally:
+            context.backbone.release_session(context.session)
+
 
 @dataclass(slots=True)
 class EmbeddedGridGroundRuntimeConfig:
@@ -171,6 +184,11 @@ class EmbeddedGridGroundRuntimeConfig:
     max_k: int = 3
     min_point_confidence: float = 0.0
     box_margin_ratio: float = 0.12
+    instruction_template: str = (
+        "Given the grid coordinate system, locate the referent described as "
+        "'{query_text}' in the image and predict the most likely target points."
+    )
+    focus_terms_template: str | None = None
 
     @classmethod
     def from_json_file(
@@ -187,6 +205,7 @@ class EmbeddedGridGroundRuntimeConfig:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         model = payload.get("model", {})
         data = payload.get("data", {})
+        runtime = payload.get("runtime", {})
         return cls(
             adapter_type=model.get("adapter_type", cls.adapter_type),
             visual_dim=int(model.get("visual_dim", cls.visual_dim)),
@@ -204,6 +223,14 @@ class EmbeddedGridGroundRuntimeConfig:
             max_k=max_k,
             min_point_confidence=min_point_confidence,
             box_margin_ratio=box_margin_ratio,
+            instruction_template=runtime.get(
+                "instruction_template",
+                cls.instruction_template,
+            ),
+            focus_terms_template=runtime.get(
+                "focus_terms_template",
+                cls.focus_terms_template,
+            ),
         )
 
 
@@ -254,9 +281,7 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
     ) -> EmbeddedLocatePrediction:
         import torch
 
-        context: SharedBackboneFeatureContext | None = None
-        try:
-            context = self.prepare_feature_context(request)
+        with self.feature_context(request) as context:
             adapter = self._get_or_load_adapter(context.backbone)
             image_payload = context.backbone.resolve_feature(context.image_features)
             text_payload = context.backbone.resolve_feature(context.text_features)
@@ -376,9 +401,16 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                 },
                 limitations=limitations,
             )
-        finally:
-            if context is not None:
-                context.backbone.release_session(context.session)
+
+    def build_instruction(self, request: TrainAdapterRuntimeRequest) -> str:
+        instruction_text = self.runtime_config.instruction_template.format(
+            query_text=request.query_text,
+        )
+        focus_terms = ", ".join(request.focus_terms)
+        focus_terms_template = self.runtime_config.focus_terms_template
+        if focus_terms and focus_terms_template:
+            return f"{instruction_text} {focus_terms_template.format(focus_terms=focus_terms)}"
+        return instruction_text
 
     def resolve_text_max_length(
         self,
@@ -431,15 +463,7 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
     def _load_adapter_state_dict(self, *, target_keys: set[str]) -> dict[str, object]:
         checkpoint_path = self._resolve_checkpoint_path()
         checkpoint = self._torch_load_checkpoint(checkpoint_path)
-        state_dict = checkpoint.get("model_state_dict", checkpoint)
-        if not isinstance(state_dict, dict):
-            raise RuntimeError("GridGround checkpoint does not contain a loadable state_dict")
-
-        normalized = {}
-        for key, value in state_dict.items():
-            normalized_key = self._normalize_state_key(key)
-            if normalized_key in target_keys:
-                normalized[normalized_key] = value
+        normalized = self._extract_adapter_state_dict(checkpoint, target_keys=target_keys)
         if not normalized:
             raise RuntimeError(
                 f"No adapter weights matched the embedded runtime checkpoint: {checkpoint_path}"
@@ -451,6 +475,60 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
             except Exception:
                 pass
         return normalized
+
+    @classmethod
+    def _extract_adapter_state_dict(
+        cls,
+        checkpoint: object,
+        *,
+        target_keys: set[str],
+    ) -> dict[str, object]:
+        best_match: dict[str, object] = {}
+        saw_mapping_candidate = False
+        for state_dict in cls._iter_state_dict_candidates(checkpoint):
+            saw_mapping_candidate = True
+            normalized: dict[str, object] = {}
+            for key, value in state_dict.items():
+                if not isinstance(key, str):
+                    continue
+                normalized_key = cls._normalize_state_key(key)
+                if normalized_key in target_keys:
+                    normalized[normalized_key] = value
+            if len(normalized) > len(best_match):
+                best_match = normalized
+            if len(best_match) == len(target_keys):
+                break
+
+        if not saw_mapping_candidate:
+            raise RuntimeError("GridGround checkpoint does not contain a loadable state_dict")
+        return best_match
+
+    @classmethod
+    def _iter_state_dict_candidates(cls, checkpoint: object):
+        if not isinstance(checkpoint, dict):
+            return
+
+        container_keys = (
+            "model_state_dict",
+            "state_dict",
+            "adapter_state_dict",
+            "adapter",
+            "model",
+            "module",
+        )
+        stack: list[dict[str, object]] = [checkpoint]
+        visited: set[int] = set()
+        while stack:
+            candidate = stack.pop()
+            candidate_id = id(candidate)
+            if candidate_id in visited:
+                continue
+            visited.add(candidate_id)
+            yield candidate
+            for key in container_keys:
+                nested = candidate.get(key)
+                if isinstance(nested, dict):
+                    stack.append(nested)
 
     def _resolve_checkpoint_path(self) -> Path:
         compact_checkpoint_path = self._compact_checkpoint_path()
