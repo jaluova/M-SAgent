@@ -16,8 +16,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install minimal checks
-        run: python3.10 -m pip install --upgrade pip ruff
+      - name: Install Python 3.10 check dependencies
+        run: python3.10 -m pip install --upgrade pip ruff -e '.[api-test]'
 
       - name: Run Python 3.10 checks
         run: bash scripts/check_py310.sh

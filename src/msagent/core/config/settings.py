@@ -21,11 +21,39 @@ class ModelPathConfig:
     locator_model_path: str | None = None
     # 定位后端相关模型或资源路径。
 
+    embedded_locator_adapter_path: str | None = None
+    # embedded locate runtime 的 adapter checkpoint 路径。
+
+    embedded_locator_config_path: str | None = None
+    # embedded locate runtime 的结构化配置路径。
+
     sam_model_path: str | None = None
     # 分割后端代码或模型目录。
 
     sam_checkpoint_path: str | None = None
     # 分割后端权重路径。
+
+    def has_embedded_locator_runtime(self) -> bool:
+        """判断真实 embedded locator 装配所需路径是否齐全。"""
+        required_paths = (
+            self.qwen_model_path,
+            self.embedded_locator_adapter_path,
+            self.embedded_locator_config_path,
+        )
+        return all(path is not None and path.strip() for path in required_paths)
+
+    def has_partial_embedded_locator_runtime(self) -> bool:
+        """判断 embedded locator 路径是否处于半配置状态。"""
+        configured = [
+            path
+            for path in (
+                self.qwen_model_path,
+                self.embedded_locator_adapter_path,
+                self.embedded_locator_config_path,
+            )
+            if path is not None and path.strip()
+        ]
+        return bool(configured) and len(configured) < 3
 
 
 @dataclass(slots=True)

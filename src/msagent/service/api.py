@@ -11,8 +11,13 @@ API 层后续可承接 FastAPI 或其他 Web 框架，但在 V1 中只保留清�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from uuid import uuid4
 
+from msagent.core.contracts.common import ArtifactRef, ImageRef
+from msagent.core.task.enums import StopReason, TaskSource, TaskStage, TaskStatus
 from msagent.core.task.models import RunTask
+from msagent.core.task.models import RunTaskIdentity, RunTaskRequest, RunTaskRuntime
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestrationResult
 
 
@@ -59,12 +64,105 @@ class APIService:
 
     def build_task(self, request: APIRequest) -> RunTask:
         """把 API 请求转换为 RunTask。"""
-        raise NotImplementedError
+        now = datetime.now()
+        task_id = f"api-task-{uuid4().hex[:8]}"
+        metadata = dict(request.request_metadata)
+
+        request_id = self._pop_optional_str(metadata, "request_id")
+        session_id = self._pop_optional_str(metadata, "session_id")
+        user_context_text = self._pop_optional_str(metadata, "user_context_text")
+        image_id = self._pop_optional_str(metadata, "image_id")
+        sha256 = self._pop_optional_str(metadata, "sha256")
+
+        return RunTask(
+            identity=RunTaskIdentity(
+                task_id=task_id,
+                source=TaskSource.API,
+                created_at=now,
+                session_id=session_id,
+                request_id=request_id,
+            ),
+            request=RunTaskRequest(
+                image_ref=ImageRef(
+                    uri=request.image_uri,
+                    image_id=image_id,
+                    sha256=sha256,
+                ),
+                raw_query=request.query_text,
+                user_context_text=user_context_text,
+                client_metadata=metadata,
+            ),
+            runtime=RunTaskRuntime(
+                stage=TaskStage.CREATED,
+                status=TaskStatus.PENDING,
+                attempt_index=0,
+                max_attempts=max(1, request.max_attempts),
+                updated_at=now,
+            ),
+        )
 
     def run(self, request: APIRequest) -> OrchestrationResult:
         """执行单次 API 推理任务。"""
-        raise NotImplementedError
+        task = self.build_task(request)
+        return self.orchestrator.run(task)
 
     def to_response(self, result: OrchestrationResult) -> APIResponse:
         """把 orchestrator 结果映射为 API 响应。"""
-        raise NotImplementedError
+        task = result.task
+        return APIResponse(
+            task_id=task.identity.task_id,
+            status=task.runtime.status.value,
+            summary=self._build_safe_summary(task),
+            result_refs=self._collect_result_refs(task),
+        )
+
+    def _collect_result_refs(self, task: RunTask) -> list[str]:
+        refs = [
+            task.result.final_mask_ref,
+            task.result.final_prompt_package_ref,
+        ]
+        return self._dedupe_artifact_ids(refs)
+
+    def _build_safe_summary(self, task: RunTask) -> str | None:
+        if task.runtime.status is TaskStatus.SUCCEEDED:
+            return "Task completed successfully."
+        if task.runtime.status is TaskStatus.RUNNING:
+            return "Task is in progress."
+        if task.runtime.status is TaskStatus.PENDING:
+            return "Task is pending."
+        if task.runtime.status is TaskStatus.HALTED:
+            return "Task was halted before completion."
+
+        stop_reason = task.result.stop_reason
+        if stop_reason is None:
+            return "Task failed."
+        if stop_reason is StopReason.MAX_ATTEMPTS_REACHED:
+            return "Task did not complete within the allowed attempts."
+        if stop_reason is StopReason.EMPTY_PROPOSAL:
+            return "Task could not produce a usable result."
+        if stop_reason is StopReason.MANUAL_STOP:
+            return "Task was stopped manually."
+        if stop_reason is StopReason.UNRECOVERABLE_ERROR:
+            return "Task failed due to an internal error."
+        if stop_reason is StopReason.ACCEPTED:
+            return "Task completed successfully."
+        return "Task failed."
+
+    @staticmethod
+    def _dedupe_artifact_ids(refs: list[ArtifactRef | None]) -> list[str]:
+        artifact_ids: list[str] = []
+        seen: set[str] = set()
+        for ref in refs:
+            if ref is None or ref.artifact_id in seen:
+                continue
+            artifact_ids.append(ref.artifact_id)
+            seen.add(ref.artifact_id)
+        return artifact_ids
+
+    @staticmethod
+    def _pop_optional_str(metadata: dict[str, object], key: str) -> str | None:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            metadata.pop(key, None)
+            return value
+        return None

@@ -32,3 +32,28 @@ echo "Running repository-wide Python 3.10 compatibility guardrails"
 
 echo "Running Python 3.10 unittest smoke"
 "${PYTHON_BIN}" -m unittest discover -s tests -p "test_minimal_vertical_slice.py"
+
+echo "Checking Python 3.10 API test dependencies"
+"${PYTHON_BIN}" - <<'PY'
+import importlib.util
+import sys
+
+required = ("fastapi", "httpx")
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if missing:
+    joined = ", ".join(missing)
+    print(
+        "error: missing API test dependencies for scripts/check_py310.sh: "
+        f"{joined}. Install them with "
+        "\"python3.10 -m pip install -e '.[api-test]'\" and rerun.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+
+echo "Running Python 3.10 API entry smoke"
+"${PYTHON_BIN}" -m unittest \
+  tests.test_api_service \
+  tests.test_api_assembly \
+  tests.test_api_server_entry \
+  tests.test_api_fastapi_integration

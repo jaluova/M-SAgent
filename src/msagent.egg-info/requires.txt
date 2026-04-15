@@ -1,0 +1,9 @@
+
+[api]
+fastapi<0.117,>=0.116
+uvicorn<0.36,>=0.35
+
+[api-test]
+fastapi<0.117,>=0.116
+uvicorn<0.36,>=0.35
+httpx<0.29,>=0.28

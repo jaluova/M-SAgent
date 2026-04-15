@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: msagent
+Version: 0.0.0
+Requires-Python: <3.11,>=3.10
+Provides-Extra: api
+Requires-Dist: fastapi<0.117,>=0.116; extra == "api"
+Requires-Dist: uvicorn<0.36,>=0.35; extra == "api"
+Provides-Extra: api-test
+Requires-Dist: fastapi<0.117,>=0.116; extra == "api-test"
+Requires-Dist: uvicorn<0.36,>=0.35; extra == "api-test"
+Requires-Dist: httpx<0.29,>=0.28; extra == "api-test"
