@@ -1,0 +1,105 @@
+{
+  "manifest_id": "embedded_locator_old_examples_v1",
+  "notes": [
+    "Weak labels only; this manifest is for local evaluation and diagnostics, not service contracts.",
+    "Each sample records whether the target should be locatable plus coarse acceptable point and box standards."
+  ],
+  "samples": [
+    {
+      "id": "truck_easy_foreground",
+      "image_path": "old/example/truck.jpg",
+      "query_text": "truck",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the pickup body, cabin, or rear shell is acceptable; road and wall are not.",
+      "acceptable_box_standard": "A coarse box around most of the white pickup is acceptable even with a little street context.",
+      "remark": "Large easy sanity sample and the current real smoke default.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.35,
+      "require_coarse_box": true
+    },
+    {
+      "id": "banana_cluster_closeup",
+      "image_path": "old/example/banana.jpg",
+      "query_text": "banana",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on any visible banana body is acceptable; avocado, apple, and pear are not.",
+      "acceptable_box_standard": "A loose box around the visible banana cluster is acceptable.",
+      "remark": "Close-up cluttered fruit scene; useful for checking distractor suppression.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.2,
+      "require_coarse_box": false
+    },
+    {
+      "id": "left_sandwich_tabletop",
+      "image_path": "old/example/bread.jpg",
+      "query_text": "the left sandwich",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the left plate sandwich is acceptable; the bowls and right sandwich are not.",
+      "acceptable_box_standard": "A coarse box around the left sandwich on the left plate is acceptable.",
+      "remark": "Two similar instances make this a minimal disambiguation sample.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.25,
+      "require_coarse_box": false
+    },
+    {
+      "id": "old_man_on_right_bench",
+      "image_path": "old/example/old_man.jpg",
+      "query_text": "the old man on the right bench",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the seated man on the right is acceptable; the woman and nearby cars are not.",
+      "acceptable_box_standard": "A coarse box covering most of the man and seated pose is acceptable.",
+      "remark": "Medium clutter person sample with nearby distractor person.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.25,
+      "require_coarse_box": false
+    },
+    {
+      "id": "left_person_with_skateboard",
+      "image_path": "old/example/two_people.jpg",
+      "query_text": "the person on the left",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the left person is acceptable; the right person and background building are not.",
+      "acceptable_box_standard": "A coarse box around the left person and their skateboard is acceptable.",
+      "remark": "Two-person side-by-side sample for left-right sensitivity.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.25,
+      "require_coarse_box": false
+    },
+    {
+      "id": "right_giraffe_standing",
+      "image_path": "old/example/right_gr.jpg",
+      "query_text": "the right giraffe",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the standing giraffe on the right is acceptable; the small left giraffe is not.",
+      "acceptable_box_standard": "A coarse box around most of the standing giraffe is acceptable even with some tree overlap.",
+      "remark": "Foreground-background separation and directional disambiguation sample.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.25,
+      "require_coarse_box": true
+    },
+    {
+      "id": "girl_in_pink_center",
+      "image_path": "old/example/pink.jpg",
+      "query_text": "the girl in pink",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the pink-shirt girl in the center is acceptable; the surrounding children are not.",
+      "acceptable_box_standard": "A coarse box around the pink-shirt girl and her seat area is acceptable.",
+      "remark": "Crowded classroom sample to catch person-attribute grounding errors.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.2,
+      "require_coarse_box": false
+    },
+    {
+      "id": "television_screen",
+      "image_path": "old/example/ tv.jpg",
+      "query_text": "television",
+      "should_locate": true,
+      "acceptable_point_standard": "At least one point on the TV body or screen area is acceptable; the lamp and room background are not.",
+      "acceptable_box_standard": "A coarse box around most of the television frame is acceptable.",
+      "remark": "Includes a filename with a leading space and a reflective indoor scene.",
+      "minimum_points": 1,
+      "minimum_top_confidence": 0.2,
+      "require_coarse_box": true
+    }
+  ]
+}

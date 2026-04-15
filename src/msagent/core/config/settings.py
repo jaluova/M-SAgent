@@ -72,6 +72,9 @@ class ServiceConfig:
     enable_cli: bool = True
     # 是否启用 CLI 层骨架。
 
+    enable_real_llm: bool = False
+    # 是否启用基于真实 Qwen 的 LLM adapter 装配。
+
 
 @dataclass(slots=True)
 class RuntimeConfig:

@@ -15,7 +15,7 @@ if str(SRC) not in sys.path:
 from msagent.core.config.settings import MSAgentSettings
 from msagent.core.contracts.types import ProposalRoute
 from msagent.core.task.enums import TaskStatus
-from msagent.infra.mock_adapters import MockLocatorAdapter
+from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter
 from msagent.service import build_default_cli_service
 from msagent.service.cli import CLIRequest
 
@@ -33,6 +33,31 @@ class RecordingEmbeddedLocatorAdapter(MockLocatorAdapter):
 class FakeEmbeddedLocatorRuntimeBundle:
     def __init__(self) -> None:
         self.locator_adapter = RecordingEmbeddedLocatorAdapter()
+        self.backbone_provider = object()
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class RecordingRealLLMAdapter(MockLLMAdapter):
+    def __init__(self) -> None:
+        super().__init__(backend_name="real-qwen-llm")
+        self.query_calls = 0
+        self.eval_calls = 0
+
+    def run_query_understanding(self, request):
+        self.query_calls += 1
+        return super().run_query_understanding(request)
+
+    def run_evaluation(self, request):
+        self.eval_calls += 1
+        return super().run_evaluation(request)
+
+
+class FakeRealLLMAdapterBundle:
+    def __init__(self) -> None:
+        self.llm_adapter = RecordingRealLLMAdapter()
         self.closed = False
 
     def close(self) -> None:
@@ -92,6 +117,82 @@ class ServiceAssemblyTests(unittest.TestCase):
                 self.assertEqual(assembly.diagnostics, ["embedded_locator_runtime=disabled"])
             finally:
                 assembly.close()
+
+    def test_default_cli_service_uses_real_llm_when_enabled(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            image_path = tmp_path / "input.png"
+            image_path.write_bytes(b"mock-image")
+
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.service.enable_real_llm = True
+            settings.model_paths.qwen_model_path = "/models/qwen"
+
+            fake_bundle = FakeRealLLMAdapterBundle()
+            with patch(
+                "msagent.service.assembly._build_default_locator_adapter",
+                return_value=(
+                    MockLocatorAdapter(backend_name="mock-locator"),
+                    None,
+                    ["embedded_locator_runtime=disabled"],
+                ),
+            ), patch(
+                "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
+                return_value=fake_bundle,
+            ) as build_bundle:
+                assembly = build_default_cli_service(settings)
+                try:
+                    result = assembly.service.run(
+                        CLIRequest(
+                            image_path=str(image_path),
+                            query_text="the red cup",
+                        )
+                    )
+                finally:
+                    assembly.close()
+
+        build_bundle.assert_called_once()
+        self.assertIs(assembly.llm_adapter, fake_bundle.llm_adapter)
+        self.assertIs(assembly.llm_bundle, fake_bundle)
+        self.assertTrue(fake_bundle.closed)
+        self.assertEqual(fake_bundle.llm_adapter.query_calls, 1)
+        self.assertEqual(fake_bundle.llm_adapter.eval_calls, 1)
+        self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
+
+    def test_default_cli_service_rejects_real_llm_without_qwen_model_path(self) -> None:
+        settings = MSAgentSettings()
+        settings.service.enable_real_llm = True
+
+        with self.assertRaisesRegex(ValueError, "qwen_model_path"):
+            build_default_cli_service(settings)
+
+    def test_default_cli_service_reuses_locator_backbone_provider_for_real_llm(self) -> None:
+        settings = MSAgentSettings()
+        settings.service.enable_real_llm = True
+        settings.model_paths.qwen_model_path = "/models/qwen"
+        settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
+        settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+
+        fake_runtime_bundle = FakeEmbeddedLocatorRuntimeBundle()
+        fake_llm_bundle = FakeRealLLMAdapterBundle()
+        with patch(
+            "msagent.service.assembly.build_embedded_locator_runtime_bundle",
+            return_value=fake_runtime_bundle,
+        ), patch(
+            "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
+            return_value=fake_llm_bundle,
+        ) as build_llm_bundle:
+            assembly = build_default_cli_service(settings)
+            try:
+                pass
+            finally:
+                assembly.close()
+
+        self.assertIs(
+            build_llm_bundle.call_args.kwargs["shared_backbone_provider"],
+            fake_runtime_bundle.backbone_provider,
+        )
 
     def test_default_cli_service_rejects_partial_embedded_runtime_configuration(self) -> None:
         with TemporaryDirectory() as tmp_dir:

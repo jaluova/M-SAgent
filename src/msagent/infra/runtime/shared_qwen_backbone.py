@@ -329,6 +329,14 @@ class QwenSharedBackboneProvider(SharedQwenBackboneProvider):
             )
         return self._backbone
 
+    def get_loaded_components(self) -> tuple[object, object]:
+        """返回可复用的已加载 model / processor 组件。"""
+        model = self.loaded_model
+        processor = self.loaded_processor
+        if model is None or processor is None:
+            model, processor = self._load_components()
+        return model, processor
+
     def close(self) -> None:
         self._backbone = None
         self.loaded_model = None

@@ -10,6 +10,11 @@ from msagent.core.policies.retry_policy import RetryPolicy
 from msagent.infra.adapters import LLMAdapter, LocatorAdapter, SAMAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
 from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
+from msagent.infra.qwen_llm_adapter import (
+    RealQwenLLMAdapterBundle,
+    RealQwenLLMAdapterConfig,
+    build_real_qwen_llm_adapter_bundle,
+)
 from msagent.infra.runtime.factory import (
     EmbeddedLocatorRuntimeBundle,
     EmbeddedLocatorRuntimeFactoryConfig,
@@ -37,6 +42,7 @@ class _DefaultCoreAssembly:
     llm_adapter: LLMAdapter
     sam_adapter: SAMAdapter
     runtime_bundle: EmbeddedLocatorRuntimeBundle | None
+    llm_bundle: RealQwenLLMAdapterBundle | None
     diagnostics: list[str]
     orchestrator: Orchestrator
 
@@ -51,6 +57,7 @@ class CLIServiceAssembly:
     llm_adapter: LLMAdapter
     sam_adapter: SAMAdapter
     runtime_bundle: EmbeddedLocatorRuntimeBundle | None = None
+    llm_bundle: RealQwenLLMAdapterBundle | None = None
     diagnostics: list[str] = field(default_factory=list)
     _closed: bool = False
 
@@ -65,6 +72,8 @@ class CLIServiceAssembly:
         if self._closed:
             return
         self._closed = True
+        if self.llm_bundle is not None:
+            self.llm_bundle.close()
         if self.runtime_bundle is not None:
             self.runtime_bundle.close()
 
@@ -80,6 +89,7 @@ class APIServiceAssembly:
     port: int
     diagnostics: list[str] = field(default_factory=list)
     _runtime_bundle: EmbeddedLocatorRuntimeBundle | None = None
+    _llm_bundle: RealQwenLLMAdapterBundle | None = None
     _closed: bool = False
 
     def handle(self, payload: dict[str, object]) -> APIResponse:
@@ -94,6 +104,8 @@ class APIServiceAssembly:
         if self._closed:
             return
         self._closed = True
+        if self._llm_bundle is not None:
+            self._llm_bundle.close()
         if self._runtime_bundle is not None:
             self._runtime_bundle.close()
 
@@ -119,6 +131,7 @@ def build_default_cli_service(
         llm_adapter=core.llm_adapter,
         sam_adapter=core.sam_adapter,
         runtime_bundle=core.runtime_bundle,
+        llm_bundle=core.llm_bundle,
         diagnostics=core.diagnostics,
     )
 
@@ -151,6 +164,7 @@ def build_default_api_service(
         port=resolved_settings.service.port,
         diagnostics=core.diagnostics,
         _runtime_bundle=core.runtime_bundle,
+        _llm_bundle=core.llm_bundle,
     )
 
 
@@ -168,10 +182,6 @@ def _build_default_core_assembly(
         )
 
     artifact_store = LocalFileArtifactStore(settings.runtime.artifact_root)
-    llm = llm_adapter or MockLLMAdapter(
-        backend_name="mock-llm",
-        evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
-    )
     sam = sam_adapter or MockSAMAdapter(
         backend_name="mock-sam",
         artifact_store=artifact_store,
@@ -179,6 +189,11 @@ def _build_default_core_assembly(
         checkpoint_path=settings.model_paths.sam_checkpoint_path,
     )
     locator_adapter, runtime_bundle, diagnostics = _build_default_locator_adapter(settings)
+    llm, llm_bundle = _build_default_llm_adapter(
+        settings,
+        llm_adapter=llm_adapter,
+        runtime_bundle=runtime_bundle,
+    )
     orchestrator = Orchestrator(
         OrchestratorDependencies(
             query_understanding_module=LLMQueryUnderstandingModule(
@@ -213,6 +228,7 @@ def _build_default_core_assembly(
         llm_adapter=llm,
         sam_adapter=sam,
         runtime_bundle=runtime_bundle,
+        llm_bundle=llm_bundle,
         diagnostics=diagnostics,
         orchestrator=orchestrator,
     )
@@ -251,3 +267,37 @@ def _build_default_locator_adapter(
         runtime_bundle,
         ["embedded_locator_runtime=enabled"],
     )
+
+
+def _build_default_llm_adapter(
+    settings: MSAgentSettings,
+    *,
+    llm_adapter: LLMAdapter | None,
+    runtime_bundle: EmbeddedLocatorRuntimeBundle | None,
+) -> tuple[LLMAdapter, RealQwenLLMAdapterBundle | None]:
+    if llm_adapter is not None:
+        return llm_adapter, None
+
+    if not settings.service.enable_real_llm:
+        return (
+            MockLLMAdapter(
+                backend_name="mock-llm",
+                evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
+            ),
+            None,
+        )
+
+    model_path = settings.model_paths.qwen_model_path
+    if model_path is None or not model_path.strip():
+        raise ValueError(
+            "Real LLM adapter requires model_paths.qwen_model_path to be configured."
+        )
+
+    shared_provider = runtime_bundle.backbone_provider if runtime_bundle is not None else None
+    llm_bundle = build_real_qwen_llm_adapter_bundle(
+        RealQwenLLMAdapterConfig(
+            qwen_model_path=model_path,
+        ),
+        shared_backbone_provider=shared_provider,
+    )
+    return llm_bundle.llm_adapter, llm_bundle

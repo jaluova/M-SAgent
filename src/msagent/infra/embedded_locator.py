@@ -39,15 +39,28 @@ class EmbeddedLocatorAdapter(LocatorAdapter):
                 diagnostics=["missing_image_ref"],
             )
 
-        runtime_prediction = self.runtime.predict_embedded_locate(
-            TrainAdapterRuntimeRequest(
-                task_id=request.task_id,
-                image_ref=image_ref,
-                query_text=request.understanding.normalized_query,
-                focus_terms=list(request.understanding.focus_terms),
-                options=dict(request.options),
+        try:
+            runtime_prediction = self.runtime.predict_embedded_locate(
+                TrainAdapterRuntimeRequest(
+                    task_id=request.task_id,
+                    image_ref=image_ref,
+                    query_text=request.understanding.normalized_query,
+                    focus_terms=list(request.understanding.focus_terms),
+                    options=dict(request.options),
+                )
             )
-        )
+        except Exception:
+            return ProposalResult(
+                proposal_id=f"{request.task_id}-proposal-embedded-locate",
+                route=ProposalRoute.LOCATE,
+                status=ProposalStatus.FAILED,
+                proposal_summary="Embedded locator runtime failed before producing a proposal.",
+                matched_text_clues=[request.understanding.normalized_query],
+                diagnostics=[
+                    "embedded_locator.failed",
+                    "reason=runtime_exception",
+                ],
+            )
         return self._map_prediction_to_proposal(request, runtime_prediction)
 
     def _map_prediction_to_proposal(
@@ -62,7 +75,7 @@ class EmbeddedLocatorAdapter(LocatorAdapter):
                 status=ProposalStatus.EMPTY,
                 proposal_summary="Embedded locate runtime returned no usable spatial prior.",
                 matched_text_clues=[request.understanding.normalized_query],
-                diagnostics=list(prediction.diagnostics),
+                diagnostics=self._sanitize_empty_diagnostics(prediction.diagnostics),
             )
 
         positive_point_hints = [
@@ -149,3 +162,15 @@ class EmbeddedLocatorAdapter(LocatorAdapter):
             confidence=point.confidence,
             reason=point.reason,
         )
+
+    def _sanitize_empty_diagnostics(self, diagnostics: list[str]) -> list[str]:
+        sanitized = ["embedded_locator.empty"]
+        if any(
+            "no_points_after_runtime_filter" in message
+            or "no_points_after_filter" in message
+            for message in diagnostics
+        ):
+            sanitized.append("reason=no_points_after_runtime_filter")
+        else:
+            sanitized.append("reason=no_usable_spatial_prior")
+        return sanitized

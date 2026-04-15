@@ -50,6 +50,7 @@ from msagent.infra.runtime.train_adapter_runtime import (
     EmbeddedLocatePoint,
     EmbeddedLocatePrediction,
     SharedBackboneTrainAdapterRuntime,
+    TrainAdapterRuntime,
     TrainAdapterRuntimeRequest,
 )
 from msagent.modules.evaluator import LLMEvaluatorModule
@@ -261,6 +262,40 @@ class DiagnosticFailedLocatorAdapter(LocatorAdapter):
             proposal_summary="embedded locator failed to initialize runtime",
             diagnostics=["embedded_locator.failed", "reason=runtime_not_ready"],
         )
+
+
+class EmptyPredictionTrainAdapterRuntime(TrainAdapterRuntime):
+    def __init__(self) -> None:
+        super().__init__(runtime_name="empty-prediction-runtime")
+        self.last_request: TrainAdapterRuntimeRequest | None = None
+
+    def predict_embedded_locate(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ) -> EmbeddedLocatePrediction:
+        self.last_request = request
+        return EmbeddedLocatePrediction(
+            runtime_name=self.runtime_name,
+            diagnostics=[
+                "selected_k=0",
+                "feature_session=fake-empty-session",
+                "no_points_after_runtime_filter",
+            ],
+            limitations=["runtime produced no point above confidence threshold"],
+        )
+
+
+class FailingPredictionTrainAdapterRuntime(TrainAdapterRuntime):
+    def __init__(self) -> None:
+        super().__init__(runtime_name="failing-prediction-runtime")
+        self.last_request: TrainAdapterRuntimeRequest | None = None
+
+    def predict_embedded_locate(
+        self,
+        request: TrainAdapterRuntimeRequest,
+    ) -> EmbeddedLocatePrediction:
+        self.last_request = request
+        raise RuntimeError("provider=embedded-locator session=session-123 crashed")
 
 
 class LegacyUriOnlyLocatorAdapter(LocatorAdapter):
@@ -1273,11 +1308,13 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
     def test_proposal_engine_surfaces_payload_diagnostics(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             store = LocalFileArtifactStore(str(Path(tmp_dir) / "artifacts"))
+            runtime = EmptyPredictionTrainAdapterRuntime()
             module = DefaultProposalEngineModule(
                 route_handlers={
                     ProposalRoute.LOCATE: LocateProposalRouteHandler(
-                        locator_adapter=DiagnosticEmptyLocatorAdapter(
-                            backend_name="diagnostic-empty-locator"
+                        locator_adapter=EmbeddedLocatorAdapter(
+                            backend_name="embedded-locator-empty-proposal",
+                            runtime=runtime,
                         )
                     )
                 },
@@ -1302,6 +1339,43 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 all(diagnostic.level == "warning" for diagnostic in output.diagnostics)
             )
+            self.assertIsNotNone(runtime.last_request)
+
+    def test_proposal_engine_surfaces_runtime_failure_diagnostics_from_embedded_adapter(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = LocalFileArtifactStore(str(Path(tmp_dir) / "artifacts"))
+            runtime = FailingPredictionTrainAdapterRuntime()
+            module = DefaultProposalEngineModule(
+                route_handlers={
+                    ProposalRoute.LOCATE: LocateProposalRouteHandler(
+                        locator_adapter=EmbeddedLocatorAdapter(
+                            backend_name="embedded-locator-failed-proposal",
+                            runtime=runtime,
+                        )
+                    )
+                },
+                artifact_store=store,
+            )
+
+            output = module.run(
+                ProposalEngineModuleInput(
+                    task_id="task-proposal-failed",
+                    attempt_index=1,
+                    understanding=make_understanding(),
+                    image_ref=ImageRef(uri="/tmp/proposal-failed.png"),
+                    preferred_route=ProposalRoute.LOCATE,
+                )
+            )
+
+            self.assertIs(output.status, ModuleStatus.FAILED)
+            self.assertEqual(
+                [diagnostic.message for diagnostic in output.diagnostics],
+                ["embedded_locator.failed", "reason=runtime_exception"],
+            )
+            self.assertTrue(
+                all(diagnostic.level == "error" for diagnostic in output.diagnostics)
+            )
+            self.assertIsNotNone(runtime.last_request)
 
     def test_legacy_locator_can_still_consume_image_uri(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -1385,11 +1459,13 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
             image_path.write_bytes(b"fake-image")
+            runtime = EmptyPredictionTrainAdapterRuntime()
 
             cli_service, _ = build_cli_service_with_embedded_locator(
                 tmp_path / "artifacts",
-                locator_adapter=DiagnosticEmptyLocatorAdapter(
-                    backend_name="diagnostic-empty-locator"
+                locator_adapter=EmbeddedLocatorAdapter(
+                    backend_name="embedded-locator-empty",
+                    runtime=runtime,
                 ),
             )
 
@@ -1413,17 +1489,20 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
                 "embedded_locator.empty; reason=no_points_after_runtime_filter",
                 task.attempt_history[0].notes,
             )
+            self.assertIsNotNone(runtime.last_request)
 
     def test_orchestrator_records_proposal_diagnostics_on_failed(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
             image_path.write_bytes(b"fake-image")
+            runtime = FailingPredictionTrainAdapterRuntime()
 
             cli_service, _ = build_cli_service_with_embedded_locator(
                 tmp_path / "artifacts",
-                locator_adapter=DiagnosticFailedLocatorAdapter(
-                    backend_name="diagnostic-failed-locator"
+                locator_adapter=EmbeddedLocatorAdapter(
+                    backend_name="embedded-locator-failed",
+                    runtime=runtime,
                 ),
             )
 
@@ -1441,12 +1520,13 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
             self.assertIs(task.result.stop_reason, StopReason.EMPTY_PROPOSAL)
             self.assertEqual(
                 task.result.failure_summary,
-                "embedded_locator.failed; reason=runtime_not_ready",
+                "embedded_locator.failed; reason=runtime_exception",
             )
             self.assertIn(
-                "embedded_locator.failed; reason=runtime_not_ready",
+                "embedded_locator.failed; reason=runtime_exception",
                 task.attempt_history[0].notes,
             )
+            self.assertIsNotNone(runtime.last_request)
 
 
 if __name__ == "__main__":
