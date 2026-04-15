@@ -28,10 +28,13 @@ class ModelPathConfig:
     # embedded locate runtime 的结构化配置路径。
 
     sam_model_path: str | None = None
-    # 分割后端代码或模型目录。
+    # 分割后端外部代码目录；当前仅支持包含 `sam3/` 包结构的仓库根目录。
 
     sam_checkpoint_path: str | None = None
     # 分割后端权重路径。
+
+    sam_bpe_path: str | None = None
+    # 可选的 SAM3 tokenizer/BPE 资源路径；未配置时尝试按仓库布局自动推断。
 
     def has_embedded_locator_runtime(self) -> bool:
         """判断真实 embedded locator 装配所需路径是否齐全。"""
@@ -54,6 +57,27 @@ class ModelPathConfig:
         if not locator_specific_configured:
             return False
         return not self.has_embedded_locator_runtime()
+
+    def has_real_sam_runtime(self) -> bool:
+        """判断真实 SAM3 装配所需路径是否齐全。"""
+        required_paths = (
+            self.sam_model_path,
+            self.sam_checkpoint_path,
+        )
+        return all(path is not None and path.strip() for path in required_paths)
+
+    def has_partial_real_sam_runtime(self) -> bool:
+        """判断 SAM3 runtime 是否出现了会导致误装配的半配置。"""
+        sam_specific_configured = any(
+            path is not None and path.strip()
+            for path in (
+                self.sam_model_path,
+                self.sam_checkpoint_path,
+            )
+        )
+        if not sam_specific_configured:
+            return False
+        return not self.has_real_sam_runtime()
 
 
 @dataclass(slots=True)

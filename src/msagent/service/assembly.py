@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from msagent.core.config.settings import MSAgentSettings
 from msagent.core.contracts.types import EvaluationVerdict, ProposalRoute
@@ -14,6 +15,11 @@ from msagent.infra.qwen_llm_adapter import (
     RealQwenLLMAdapterBundle,
     RealQwenLLMAdapterConfig,
     build_real_qwen_llm_adapter_bundle,
+)
+from msagent.infra.sam3_adapter import (
+    RealSAM3AdapterBundle,
+    RealSAM3AdapterConfig,
+    build_real_sam3_adapter_bundle,
 )
 from msagent.infra.runtime.factory import (
     EmbeddedLocatorRuntimeBundle,
@@ -31,6 +37,10 @@ from msagent.service.api import APIResponse, APIService
 from msagent.service.api_transport import APIHandler, create_fastapi_app
 from msagent.service.cli import CLIService
 from msagent.service.cli import CLIRequest
+from msagent.service.demo_report import (
+    build_demo_task_report,
+    render_demo_task_report_markdown,
+)
 
 
 @dataclass(slots=True)
@@ -43,6 +53,7 @@ class _DefaultCoreAssembly:
     sam_adapter: SAMAdapter
     runtime_bundle: EmbeddedLocatorRuntimeBundle | None
     llm_bundle: RealQwenLLMAdapterBundle | None
+    sam_bundle: RealSAM3AdapterBundle | None
     diagnostics: list[str]
     orchestrator: Orchestrator
 
@@ -58,13 +69,16 @@ class CLIServiceAssembly:
     sam_adapter: SAMAdapter
     runtime_bundle: EmbeddedLocatorRuntimeBundle | None = None
     llm_bundle: RealQwenLLMAdapterBundle | None = None
+    sam_bundle: RealSAM3AdapterBundle | None = None
     diagnostics: list[str] = field(default_factory=list)
     _closed: bool = False
 
     def run(self, request: CLIRequest) -> OrchestrationResult:
         """执行一次默认 CLI 任务，并对称释放装配阶段持有的资源。"""
         try:
-            return self.service.run(request)
+            result = self.service.run(request)
+            self._write_task_report_if_requested(request, result)
+            return result
         finally:
             self.close()
 
@@ -72,10 +86,30 @@ class CLIServiceAssembly:
         if self._closed:
             return
         self._closed = True
+        if self.sam_bundle is not None:
+            self.sam_bundle.close()
         if self.llm_bundle is not None:
             self.llm_bundle.close()
         if self.runtime_bundle is not None:
             self.runtime_bundle.close()
+
+    def _write_task_report_if_requested(
+        self,
+        request: CLIRequest,
+        result: OrchestrationResult,
+    ) -> None:
+        output_dir = request.output_dir
+        if output_dir is None or not output_dir.strip():
+            return
+
+        report = build_demo_task_report(
+            result,
+            artifact_store=self.artifact_store,
+        )
+        markdown = render_demo_task_report_markdown(report)
+        output_path = Path(output_dir).expanduser().resolve()
+        output_path.mkdir(parents=True, exist_ok=True)
+        (output_path / "task_report.md").write_text(markdown, encoding="utf-8")
 
 
 @dataclass(slots=True)
@@ -90,6 +124,7 @@ class APIServiceAssembly:
     diagnostics: list[str] = field(default_factory=list)
     _runtime_bundle: EmbeddedLocatorRuntimeBundle | None = None
     _llm_bundle: RealQwenLLMAdapterBundle | None = None
+    _sam_bundle: RealSAM3AdapterBundle | None = None
     _closed: bool = False
 
     def handle(self, payload: dict[str, object]) -> APIResponse:
@@ -104,6 +139,8 @@ class APIServiceAssembly:
         if self._closed:
             return
         self._closed = True
+        if self._sam_bundle is not None:
+            self._sam_bundle.close()
         if self._llm_bundle is not None:
             self._llm_bundle.close()
         if self._runtime_bundle is not None:
@@ -116,7 +153,7 @@ def build_default_cli_service(
     llm_adapter: LLMAdapter | None = None,
     sam_adapter: SAMAdapter | None = None,
 ) -> CLIServiceAssembly:
-    """构造默认 CLI service，并在配置完整时接入真实 embedded locator。"""
+    """构造默认 CLI service，并在配置完整时接入真实 locator / SAM。"""
     resolved_settings = settings or MSAgentSettings()
     core = _build_default_core_assembly(
         resolved_settings,
@@ -132,6 +169,7 @@ def build_default_cli_service(
         sam_adapter=core.sam_adapter,
         runtime_bundle=core.runtime_bundle,
         llm_bundle=core.llm_bundle,
+        sam_bundle=core.sam_bundle,
         diagnostics=core.diagnostics,
     )
 
@@ -165,6 +203,7 @@ def build_default_api_service(
         diagnostics=core.diagnostics,
         _runtime_bundle=core.runtime_bundle,
         _llm_bundle=core.llm_bundle,
+        _sam_bundle=core.sam_bundle,
     )
 
 
@@ -182,46 +221,57 @@ def _build_default_core_assembly(
         )
 
     artifact_store = LocalFileArtifactStore(settings.runtime.artifact_root)
-    sam = sam_adapter or MockSAMAdapter(
-        backend_name="mock-sam",
-        artifact_store=artifact_store,
-        model_path=settings.model_paths.sam_model_path,
-        checkpoint_path=settings.model_paths.sam_checkpoint_path,
-    )
     locator_adapter, runtime_bundle, diagnostics = _build_default_locator_adapter(settings)
-    llm, llm_bundle = _build_default_llm_adapter(
-        settings,
-        llm_adapter=llm_adapter,
-        runtime_bundle=runtime_bundle,
-    )
-    orchestrator = Orchestrator(
-        OrchestratorDependencies(
-            query_understanding_module=LLMQueryUnderstandingModule(
-                llm_adapter=llm,
-                artifact_store=artifact_store,
-            ),
-            proposal_engine_module=DefaultProposalEngineModule(
-                route_handlers={
-                    ProposalRoute.LOCATE: LocateProposalRouteHandler(
-                        locator_adapter=locator_adapter
-                    )
-                },
-                artifact_store=artifact_store,
-            ),
-            prompt_bridge_module=RuleBasedPromptBridgeModule(artifact_store=artifact_store),
-            segmenter_module=SAMSegmenterModule(
-                sam_adapter=sam,
-                artifact_store=artifact_store,
-            ),
-            evaluator_module=LLMEvaluatorModule(
-                llm_adapter=llm,
-                artifact_store=artifact_store,
-            ),
-            retry_policy=RetryPolicy(
-                default_route=settings.runtime.default_route,
-            ),
+    llm_bundle: RealQwenLLMAdapterBundle | None = None
+    sam_bundle: RealSAM3AdapterBundle | None = None
+    try:
+        sam, sam_bundle, sam_diagnostics = _build_default_sam_adapter(
+            settings,
+            sam_adapter=sam_adapter,
+            artifact_store=artifact_store,
         )
-    )
+        diagnostics.extend(sam_diagnostics)
+        llm, llm_bundle = _build_default_llm_adapter(
+            settings,
+            llm_adapter=llm_adapter,
+            runtime_bundle=runtime_bundle,
+        )
+        orchestrator = Orchestrator(
+            OrchestratorDependencies(
+                query_understanding_module=LLMQueryUnderstandingModule(
+                    llm_adapter=llm,
+                    artifact_store=artifact_store,
+                ),
+                proposal_engine_module=DefaultProposalEngineModule(
+                    route_handlers={
+                        ProposalRoute.LOCATE: LocateProposalRouteHandler(
+                            locator_adapter=locator_adapter
+                        )
+                    },
+                    artifact_store=artifact_store,
+                ),
+                prompt_bridge_module=RuleBasedPromptBridgeModule(artifact_store=artifact_store),
+                segmenter_module=SAMSegmenterModule(
+                    sam_adapter=sam,
+                    artifact_store=artifact_store,
+                ),
+                evaluator_module=LLMEvaluatorModule(
+                    llm_adapter=llm,
+                    artifact_store=artifact_store,
+                ),
+                retry_policy=RetryPolicy(
+                    default_route=settings.runtime.default_route,
+                ),
+            )
+        )
+    except Exception:
+        if llm_bundle is not None:
+            llm_bundle.close()
+        if sam_bundle is not None:
+            sam_bundle.close()
+        if runtime_bundle is not None:
+            runtime_bundle.close()
+        raise
     return _DefaultCoreAssembly(
         artifact_store=artifact_store,
         locator_adapter=locator_adapter,
@@ -229,6 +279,7 @@ def _build_default_core_assembly(
         sam_adapter=sam,
         runtime_bundle=runtime_bundle,
         llm_bundle=llm_bundle,
+        sam_bundle=sam_bundle,
         diagnostics=diagnostics,
         orchestrator=orchestrator,
     )
@@ -267,6 +318,45 @@ def _build_default_locator_adapter(
         runtime_bundle,
         ["embedded_locator_runtime=enabled"],
     )
+
+
+def _build_default_sam_adapter(
+    settings: MSAgentSettings,
+    *,
+    sam_adapter: SAMAdapter | None,
+    artifact_store: LocalFileArtifactStore,
+) -> tuple[SAMAdapter, RealSAM3AdapterBundle | None, list[str]]:
+    if sam_adapter is not None:
+        return sam_adapter, None, ["sam_runtime=custom"]
+
+    model_paths = settings.model_paths
+    if model_paths.has_partial_real_sam_runtime():
+        raise ValueError(
+            "SAM3 runtime configuration is partial; "
+            "sam_model_path and sam_checkpoint_path must be provided together."
+        )
+
+    if not model_paths.has_real_sam_runtime():
+        return (
+            MockSAMAdapter(
+                backend_name="mock-sam",
+                artifact_store=artifact_store,
+                model_path=model_paths.sam_model_path,
+                checkpoint_path=model_paths.sam_checkpoint_path,
+            ),
+            None,
+            ["sam_runtime=disabled"],
+        )
+
+    sam_bundle = build_real_sam3_adapter_bundle(
+        RealSAM3AdapterConfig(
+            sam_model_path=model_paths.sam_model_path or "",
+            checkpoint_path=model_paths.sam_checkpoint_path or "",
+            bpe_path=model_paths.sam_bpe_path,
+        ),
+        artifact_store=artifact_store,
+    )
+    return sam_bundle.sam_adapter, sam_bundle, ["sam_runtime=enabled"]
 
 
 def _build_default_llm_adapter(

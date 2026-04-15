@@ -150,7 +150,10 @@ class APIAssemblyTests(unittest.TestCase):
         self.assertEqual(response.summary, "Task completed successfully.")
         self.assertEqual(assembly.host, "0.0.0.0")
         self.assertEqual(assembly.port, 9010)
-        self.assertEqual(assembly.diagnostics, ["embedded_locator_runtime=enabled"])
+        self.assertEqual(
+            assembly.diagnostics,
+            ["embedded_locator_runtime=enabled", "sam_runtime=disabled"],
+        )
         self.assertEqual(fake_bundle.locator_adapter.locate_calls, 1)
         self.assertTrue(fake_bundle.closed)
         self.assertFalse(hasattr(assembly, "runtime_bundle"))
@@ -190,7 +193,10 @@ class APIAssemblyTests(unittest.TestCase):
 
         build_bundle.assert_called_once()
         self.assertEqual(response.status, "succeeded")
-        self.assertEqual(assembly.diagnostics, ["embedded_locator_runtime=disabled"])
+        self.assertEqual(
+            assembly.diagnostics,
+            ["embedded_locator_runtime=disabled", "sam_runtime=disabled"],
+        )
         self.assertEqual(fake_bundle.llm_adapter.query_calls, 1)
         self.assertEqual(fake_bundle.llm_adapter.eval_calls, 1)
         self.assertTrue(fake_bundle.closed)
