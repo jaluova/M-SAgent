@@ -34,5 +34,6 @@ temp_*.npy
 sam3/results/
 
 docs/*
+!docs/project-status.html
 !docs/tech-report/
 !docs/tech-report/**
