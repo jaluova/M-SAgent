@@ -16,7 +16,7 @@ class ModelPathConfig:
     """模型与权重路径配置。"""
 
     qwen_model_path: str | None = None
-    # LLM 或多模态理解后端的模型路径。
+    # 共享的 Qwen 主干模型路径，可同时服务 real LLM 与 embedded locator runtime。
 
     locator_model_path: str | None = None
     # 定位后端相关模型或资源路径。
@@ -43,17 +43,17 @@ class ModelPathConfig:
         return all(path is not None and path.strip() for path in required_paths)
 
     def has_partial_embedded_locator_runtime(self) -> bool:
-        """判断 embedded locator 路径是否处于半配置状态。"""
-        configured = [
-            path
+        """判断 embedded locator runtime 是否出现了会导致误装配的半配置。"""
+        locator_specific_configured = any(
+            path is not None and path.strip()
             for path in (
-                self.qwen_model_path,
                 self.embedded_locator_adapter_path,
                 self.embedded_locator_config_path,
             )
-            if path is not None and path.strip()
-        ]
-        return bool(configured) and len(configured) < 3
+        )
+        if not locator_specific_configured:
+            return False
+        return not self.has_embedded_locator_runtime()
 
 
 @dataclass(slots=True)

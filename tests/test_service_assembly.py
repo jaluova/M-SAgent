@@ -131,13 +131,6 @@ class ServiceAssemblyTests(unittest.TestCase):
 
             fake_bundle = FakeRealLLMAdapterBundle()
             with patch(
-                "msagent.service.assembly._build_default_locator_adapter",
-                return_value=(
-                    MockLocatorAdapter(backend_name="mock-locator"),
-                    None,
-                    ["embedded_locator_runtime=disabled"],
-                ),
-            ), patch(
                 "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
                 return_value=fake_bundle,
             ) as build_bundle:
@@ -155,6 +148,8 @@ class ServiceAssemblyTests(unittest.TestCase):
         build_bundle.assert_called_once()
         self.assertIs(assembly.llm_adapter, fake_bundle.llm_adapter)
         self.assertIs(assembly.llm_bundle, fake_bundle)
+        self.assertIsInstance(assembly.locator_adapter, MockLocatorAdapter)
+        self.assertEqual(assembly.diagnostics, ["embedded_locator_runtime=disabled"])
         self.assertTrue(fake_bundle.closed)
         self.assertEqual(fake_bundle.llm_adapter.query_calls, 1)
         self.assertEqual(fake_bundle.llm_adapter.eval_calls, 1)
@@ -199,6 +194,7 @@ class ServiceAssemblyTests(unittest.TestCase):
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
             settings.model_paths.qwen_model_path = "/models/qwen"
+            settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
 
             with self.assertRaisesRegex(ValueError, "partial"):
                 build_default_cli_service(settings)

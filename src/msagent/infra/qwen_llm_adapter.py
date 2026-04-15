@@ -58,7 +58,7 @@ class RealQwenLLMAdapter(LLMAdapter):
     当前阶段只承诺：
     - query understanding 走真实模型生成
     - evaluator 走真实模型生成
-    - 若解析失败，回退到稳定启发式，避免主链直接因格式漂移崩掉
+    - 若 evaluator 输出解析或校验失败，回退到保守 verdict，避免格式漂移被误验收
     """
 
     backbone_provider: QwenSharedBackboneProvider
@@ -77,10 +77,11 @@ class RealQwenLLMAdapter(LLMAdapter):
 
     def run_evaluation(self, request: EvaluationAdapterRequest) -> EvaluationResult:
         prompt = self._build_evaluation_prompt(request)
+        raw_text = self._generate_text(prompt)
         try:
-            payload = self._parse_json_object(self._generate_text(prompt))
+            payload = self._parse_json_object(raw_text)
             return self._evaluation_from_payload(request, payload)
-        except Exception:
+        except ValueError:
             return self._fallback_evaluation(request)
 
     def _generate_text(self, prompt: str) -> str:
@@ -184,18 +185,23 @@ class RealQwenLLMAdapter(LLMAdapter):
         if primary_candidate is not None:
             return EvaluationResult(
                 evaluation_id=f"{request.task_id}-evaluation",
-                verdict=EvaluationVerdict.ACCEPT,
-                summary="Real Qwen fallback accepted the primary segmentation candidate.",
-                accepted_candidate_id=primary_candidate.candidate_id,
-                accepted_mask_ref=primary_candidate.mask_ref,
-                confidence=0.5,
+                verdict=EvaluationVerdict.REVIEW,
+                summary=(
+                    "Real Qwen fallback requested review because the evaluator output "
+                    "could not be safely interpreted."
+                ),
+                confidence=0.0,
+                retry_hints=["retry_with_same_route"],
             )
         return EvaluationResult(
             evaluation_id=f"{request.task_id}-evaluation",
             verdict=EvaluationVerdict.REJECT,
-            summary="Real Qwen fallback rejected because no segmentation candidate was available.",
+            summary=(
+                "Real Qwen fallback rejected because no segmentation candidate was "
+                "available after evaluator fallback was triggered."
+            ),
             failure_type=FailureType.LOCALIZATION_ERROR,
-            confidence=0.5,
+            confidence=0.0,
             retry_hints=["retry_with_same_route"],
         )
 
@@ -416,12 +422,14 @@ def _read_referent_number(value: object) -> ReferentNumber:
 
 
 def _read_evaluation_verdict(value: object) -> EvaluationVerdict:
-    if isinstance(value, str):
-        try:
-            return EvaluationVerdict(value.strip().lower())
-        except ValueError:
-            pass
-    return EvaluationVerdict.REJECT
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Real Qwen evaluation payload must include a non-empty verdict")
+    try:
+        return EvaluationVerdict(value.strip().lower())
+    except ValueError as exc:
+        raise ValueError(
+            f"Real Qwen evaluation payload returned unsupported verdict: {value!r}"
+        ) from exc
 
 
 def _read_failure_type(value: object) -> FailureType | None:
