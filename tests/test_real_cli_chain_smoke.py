@@ -13,11 +13,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from msagent.core.config.settings import MSAgentSettings
-from msagent.core.contracts.types import EvaluationVerdict, SegmentationResult, SegmentationStatus
-from msagent.core.task.enums import TaskStatus
+from msagent.core.contracts.types import SegmentationResult, SegmentationStatus
 from msagent.infra.embedded_locator import EmbeddedLocatorAdapter
-from msagent.infra.mock_adapters import MockLLMAdapter
-from msagent.infra.mock_artifacts import MockMask
+from msagent.infra.mask_artifact import MaskArtifact
 from msagent.infra.sam3_adapter import RealSAM3Adapter
 from msagent.service import build_default_cli_service
 from msagent.service.cli import CLIRequest
@@ -69,14 +67,9 @@ class RealCLIChainSmokeTests(unittest.TestCase):
             settings.model_paths.embedded_locator_adapter_path = gridground_adapter_path
             settings.model_paths.sam_model_path = sam_model_path
             settings.model_paths.sam_checkpoint_path = sam_checkpoint_path
+            settings.service.enable_real_llm = True
 
-            assembly = build_default_cli_service(
-                settings,
-                llm_adapter=MockLLMAdapter(
-                    backend_name="mock-llm-real-cli-smoke",
-                    evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
-                ),
-            )
+            assembly = build_default_cli_service(settings)
 
             self.assertIsInstance(assembly.locator_adapter, EmbeddedLocatorAdapter)
             self.assertIsInstance(assembly.sam_adapter, RealSAM3Adapter)
@@ -94,8 +87,6 @@ class RealCLIChainSmokeTests(unittest.TestCase):
                 assembly.diagnostics,
                 ["embedded_locator_runtime=enabled", "sam_runtime=enabled"],
             )
-            self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
-            self.assertIs(result.task.result.final_verdict, EvaluationVerdict.ACCEPT)
             self.assertGreaterEqual(assembly.sam_adapter.segment_calls, 1)
 
             attempt = result.task.attempt_history[0]
@@ -115,10 +106,10 @@ class RealCLIChainSmokeTests(unittest.TestCase):
                 any(message.startswith("backend=sam3-real") for message in segmentation.diagnostics)
             )
 
-            primary_mask_ref = result.task.result.final_mask_ref
+            primary_mask_ref = segmentation.candidates[0].mask_ref
             self.assertIsNotNone(primary_mask_ref)
             assert primary_mask_ref is not None
-            mask_payload = assembly.artifact_store.load_artifact(primary_mask_ref, MockMask)
+            mask_payload = assembly.artifact_store.load_artifact(primary_mask_ref, MaskArtifact)
             self.assertEqual(mask_payload.label, "sam3_mask")
             self.assertEqual(mask_payload.backend_name, "sam3-real")
             self.assertIsNotNone(mask_payload.pixel_area)
@@ -130,7 +121,7 @@ class RealCLIChainSmokeTests(unittest.TestCase):
             self.assertIn("# M-SAgent Demo Report", report_text)
             self.assertIn("Embedded locator returned", report_text)
             self.assertIn("Real SAM3 adapter produced", report_text)
-            self.assertIn("Mock evaluator accepted", report_text)
+            self.assertIn("- Evaluation:", report_text)
             self.assertIn(result.task.identity.task_id, report_text)
 
     def _require_env(self, name: str) -> str:

@@ -12,8 +12,9 @@ if str(SRC) not in sys.path:
 
 from msagent.core.contracts.adapter_requests import SegmentAdapterRequest
 from msagent.core.contracts.types import (
+    BoxPrompt,
     ExecutionHints,
-    NormalizedBox,
+    PointPrompt,
     PromptMetadata,
     PromptPackage,
     PromptTextBundle,
@@ -22,7 +23,7 @@ from msagent.core.contracts.types import (
     SpatialPromptBundle,
 )
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
-from msagent.infra.mock_artifacts import MockMask
+from msagent.infra.mask_artifact import MaskArtifact
 from msagent.infra.sam3_adapter import (
     RealSAM3Adapter,
     RealSAM3AdapterConfig,
@@ -116,11 +117,19 @@ def write_fake_external_sam_repo(
         "        self.bpe_path = bpe_path",
         "        self.checkpoint_path = checkpoint_path",
         "        self.cpu_calls = 0",
+        "        self.last_predict_kwargs = None",
         "",
         "    def cpu(self):",
         "        self.cpu_calls += 1",
         "",
-        "    def predict_inst(self, inference_state, point_coords=None, point_labels=None, box=None, multimask_output=True):",
+        "    def predict_inst(self, inference_state, point_coords=None, point_labels=None, box=None, multimask_output=True, normalize_coords=True):",
+        "        self.last_predict_kwargs = {",
+        "            'point_coords': point_coords,",
+        "            'point_labels': point_labels,",
+        "            'box': box,",
+        "            'multimask_output': multimask_output,",
+        "            'normalize_coords': normalize_coords,",
+        "        }",
         "        return [[[1, 1], [0, 0]]], [0.9], None",
         "",
     ]
@@ -232,13 +241,22 @@ class RealSAM3AdapterTests(unittest.TestCase):
             self.assertIn("prompt_mode=spatial", result.diagnostics)
             self.assertIn("candidate_count=2", result.diagnostics)
 
-            first_mask = store.load_artifact(result.candidates[0].mask_ref, MockMask)
-            second_mask = store.load_artifact(result.candidates[1].mask_ref, MockMask)
+            first_mask = store.load_artifact(result.candidates[0].mask_ref, MaskArtifact)
+            second_mask = store.load_artifact(result.candidates[1].mask_ref, MaskArtifact)
 
             self.assertEqual(first_mask.label, "sam3_mask")
             self.assertEqual(first_mask.backend_name, "sam3-real")
             self.assertEqual(first_mask.prompt_mode, "spatial")
             self.assertEqual(first_mask.pixel_area, 4)
+            self.assertEqual(
+                first_mask.mask_bitmap,
+                [
+                    [False, False, False, False],
+                    [False, True, True, False],
+                    [False, True, True, False],
+                    [False, False, False, False],
+                ],
+            )
             self.assertAlmostEqual(first_mask.active_box.x1, 0.25)
             self.assertAlmostEqual(first_mask.active_box.x2, 0.75)
             self.assertEqual(second_mask.pixel_area, 4)
@@ -396,6 +414,60 @@ class RealSAM3AdapterTests(unittest.TestCase):
                     ),
                     artifact_store=store,
                 )
+
+    def test_loaded_runtime_passes_normalized_spatial_prompts_without_re_normalizing(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            repo_root, checkpoint_path, custom_bpe_path = write_fake_external_sam_repo(
+                tmp_path / "repo-one",
+                marker="repo-one",
+            )
+            store = LocalFileArtifactStore(str(tmp_path / "artifacts"))
+            image_path = tmp_path / "input.png"
+            image_path.write_bytes(b"fake-image")
+
+            bundle = build_real_sam3_adapter_bundle(
+                RealSAM3AdapterConfig(
+                    sam_model_path=str(repo_root),
+                    checkpoint_path=str(checkpoint_path),
+                    bpe_path=str(custom_bpe_path),
+                ),
+                artifact_store=store,
+            )
+            try:
+                prompt_package = PromptPackage(
+                    package_id="pkg-spatial",
+                    package_version="v1",
+                    text_prompts=PromptTextBundle(
+                        normalized_text="truck",
+                        raw_text="truck",
+                    ),
+                    spatial_prompts=SpatialPromptBundle(
+                        positive_points=[
+                            PointPrompt(x=0.45, y=0.6),
+                        ],
+                        negative_points=[],
+                        boxes=[
+                            BoxPrompt(x1=0.2, y1=0.25, x2=0.8, y2=0.9),
+                        ],
+                    ),
+                    metadata=PromptMetadata(produced_from_route=ProposalRoute.LOCATE),
+                    execution_hints=ExecutionHints(multimask=False),
+                )
+
+                bundle.sam_adapter.runtime.predict(
+                    image_path=image_path,
+                    prompt_package=prompt_package,
+                )
+
+                last_predict_kwargs = bundle.sam_adapter.runtime.model.last_predict_kwargs
+                self.assertIsNotNone(last_predict_kwargs)
+                self.assertFalse(last_predict_kwargs["normalize_coords"])
+                self.assertEqual(last_predict_kwargs["point_coords"], [[0.45, 0.6]])
+                self.assertEqual(last_predict_kwargs["point_labels"], [1])
+                self.assertEqual(last_predict_kwargs["box"], [0.2, 0.25, 0.8, 0.9])
+            finally:
+                bundle.close()
 
 
 if __name__ == "__main__":

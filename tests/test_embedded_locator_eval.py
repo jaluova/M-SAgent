@@ -76,7 +76,7 @@ class RecordingEmbeddedRuntime(TrainAdapterRuntime):
                 EmbeddedLocatePoint(x=0.41, y=0.49, confidence=0.72, reason="peak_2"),
             ],
             coarse_box=NormalizedBox(x1=0.2, y1=0.3, x2=0.6, y2=0.7),
-            diagnostics=["selected_k=2", "feature_session=fake-session"],
+            diagnostics=["selected_k=2"],
             limitations=["coarse_box derived from selected point envelope"],
         )
 

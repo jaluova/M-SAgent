@@ -40,7 +40,6 @@ from msagent.infra.backbones import (
 from msagent.infra.adapters import LocatorAdapter
 from msagent.infra.embedded_locator import EmbeddedLocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
-from msagent.infra.mock_adapters import MockLLMAdapter, MockSAMAdapter
 from msagent.infra.runtime.shared_qwen_backbone import QwenSharedVisionLanguageBackbone
 from msagent.infra.runtime.train_adapter_runtime import (
     DEFAULT_EMBEDDED_GRIDGROUND_INSTRUCTION_TEMPLATE,
@@ -64,6 +63,10 @@ from msagent.modules.query_understanding import LLMQueryUnderstandingModule
 from msagent.modules.segmenter import SAMSegmenterModule
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestratorDependencies
 from msagent.service.cli import CLIRequest, CLIService
+from tests.support.deterministic_adapters import (
+    DeterministicLLMAdapter,
+    DeterministicSAMAdapter,
+)
 
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
@@ -194,7 +197,7 @@ class FakeEmbeddedTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                         reason="runtime produced both coarse box and point priors",
                     )
                 ],
-                diagnostics=[f"session={context.session.session_id}"],
+                diagnostics=["selected_k=2"],
                 metadata={
                     "backbone": context.backbone.backbone_name,
                     "device": context.backbone.device,
@@ -278,7 +281,6 @@ class EmptyPredictionTrainAdapterRuntime(TrainAdapterRuntime):
             runtime_name=self.runtime_name,
             diagnostics=[
                 "selected_k=0",
-                "feature_session=fake-empty-session",
                 "no_points_after_runtime_filter",
             ],
             limitations=["runtime produced no point above confidence threshold"],
@@ -431,8 +433,8 @@ def build_cli_service_with_embedded_locator(
     locator_adapter: LocatorAdapter,
 ) -> tuple[CLIService, LocalFileArtifactStore]:
     store = LocalFileArtifactStore(str(artifact_root))
-    llm_adapter = MockLLMAdapter(
-        backend_name="mock-llm",
+    llm_adapter = DeterministicLLMAdapter(
+        backend_name="deterministic-llm",
         evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
     )
     orchestrator = Orchestrator(
@@ -451,8 +453,8 @@ def build_cli_service_with_embedded_locator(
             ),
             prompt_bridge_module=RuleBasedPromptBridgeModule(artifact_store=store),
             segmenter_module=SAMSegmenterModule(
-                sam_adapter=MockSAMAdapter(
-                    backend_name="mock-sam",
+                sam_adapter=DeterministicSAMAdapter(
+                    backend_name="deterministic-sam",
                     artifact_store=store,
                 ),
                 artifact_store=store,
@@ -542,9 +544,7 @@ class EmbeddedLocateIntegrationTests(unittest.TestCase):
         self.assertTrue(
             any(hint.hint_type == "prefer_box_plus_points" for hint in proposal.bridge_hints)
         )
-        self.assertTrue(
-            any(message.startswith("runtime_metadata=") for message in proposal.diagnostics)
-        )
+        self.assertEqual(proposal.diagnostics, ["selected_k=2"])
         self.assertIsNotNone(runtime.last_request)
         assert runtime.last_request is not None
         self.assertEqual(runtime.last_request.image_ref.uri, "/tmp/input.png")

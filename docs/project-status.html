@@ -3,79 +3,78 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>M-SAgent 项目进度快照</title>
+    <title>M-SAgent 当前完成度总览</title>
     <style>
       :root {
-        --bg: #f5efe5;
-        --panel: rgba(255, 252, 247, 0.86);
-        --panel-strong: #fffaf1;
+        --bg: #f3efe7;
+        --surface: rgba(255, 252, 247, 0.9);
+        --surface-strong: #fffdf9;
         --ink: #1e2430;
-        --muted: #5f6675;
-        --line: rgba(30, 36, 48, 0.12);
-        --accent: #d96f32;
-        --accent-soft: #f3b588;
-        --teal: #1f7a74;
-        --gold: #d8a12d;
-        --rose: #b85353;
-        --shadow: 0 22px 60px rgba(73, 55, 31, 0.12);
+        --muted: #657084;
+        --line: rgba(30, 36, 48, 0.1);
+        --accent: #c85e25;
+        --accent-soft: #efb28d;
+        --teal: #1d7a73;
+        --gold: #b78628;
+        --rose: #b04f4f;
+        --shadow: 0 24px 60px rgba(62, 46, 25, 0.12);
         --radius-xl: 28px;
-        --radius-lg: 22px;
-        --radius-md: 16px;
+        --radius-lg: 20px;
+        --radius-md: 15px;
       }
 
       * {
         box-sizing: border-box;
       }
 
-      html {
-        scroll-behavior: smooth;
-      }
-
       body {
         margin: 0;
+        color: var(--ink);
         font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB",
           "Microsoft YaHei", sans-serif;
-        color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(217, 111, 50, 0.18), transparent 28%),
-          radial-gradient(circle at 88% 12%, rgba(31, 122, 116, 0.16), transparent 26%),
-          linear-gradient(160deg, #f8f2e8 0%, #f4ebdd 45%, #efe6d8 100%);
+          radial-gradient(circle at 12% 10%, rgba(200, 94, 37, 0.18), transparent 20%),
+          radial-gradient(circle at 88% 12%, rgba(29, 122, 115, 0.15), transparent 20%),
+          linear-gradient(165deg, #f7f3ec 0%, #f1ece4 48%, #ebe3d8 100%);
       }
 
       a {
         color: inherit;
       }
 
+      code {
+        padding: 0.16em 0.42em;
+        border-radius: 8px;
+        background: rgba(30, 36, 48, 0.08);
+        font-family: "SFMono-Regular", "SF Mono", "JetBrains Mono", "Menlo",
+          monospace;
+        font-size: 0.92em;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
       .page {
-        width: min(1180px, calc(100vw - 40px));
+        width: min(1180px, calc(100vw - 36px));
         margin: 0 auto;
-        padding: 36px 0 64px;
+        padding: 30px 0 60px;
       }
 
       .hero {
-        position: relative;
-        overflow: hidden;
         display: grid;
-        grid-template-columns: 1.35fr 0.95fr;
-        gap: 24px;
-        padding: 34px;
-        border: 1px solid rgba(255, 255, 255, 0.55);
+        grid-template-columns: 1.3fr 0.92fr;
+        gap: 22px;
+        padding: 30px;
         border-radius: 34px;
+        border: 1px solid rgba(255, 255, 255, 0.58);
         background:
-          linear-gradient(135deg, rgba(255, 250, 241, 0.95), rgba(252, 247, 240, 0.8)),
-          #fffaf1;
+          linear-gradient(145deg, rgba(255, 253, 249, 0.95), rgba(249, 244, 238, 0.86)),
+          var(--surface-strong);
         box-shadow: var(--shadow);
-      }
-
-      .hero::after {
-        content: "";
-        position: absolute;
-        inset: auto -60px -80px auto;
-        width: 260px;
-        height: 260px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(217, 111, 50, 0.18), transparent 68%);
-        pointer-events: none;
       }
 
       .eyebrow {
@@ -87,81 +86,77 @@
         background: rgba(30, 36, 48, 0.06);
         color: var(--muted);
         font-size: 13px;
-        letter-spacing: 0.04em;
-      }
-
-      h1,
-      h2,
-      h3,
-      p {
-        margin: 0;
       }
 
       .hero h1 {
-        margin-top: 18px;
-        font-size: clamp(34px, 5vw, 58px);
+        margin-top: 16px;
+        font-size: clamp(34px, 5vw, 60px);
         line-height: 0.98;
         letter-spacing: -0.03em;
       }
 
       .hero p {
-        margin-top: 18px;
-        max-width: 58ch;
-        font-size: 17px;
-        line-height: 1.7;
+        margin-top: 16px;
+        max-width: 60ch;
         color: var(--muted);
+        font-size: 17px;
+        line-height: 1.75;
       }
 
-      .hero-summary {
+      .hero-metrics {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
         margin-top: 24px;
       }
 
-      .mini-stat {
+      .metric {
         padding: 16px;
-        border: 1px solid var(--line);
         border-radius: var(--radius-md);
-        background: rgba(255, 255, 255, 0.58);
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.62);
       }
 
-      .mini-stat strong {
+      .metric strong {
         display: block;
-        font-size: 26px;
+        font-size: 28px;
         line-height: 1;
       }
 
-      .mini-stat span {
+      .metric span {
         display: block;
         margin-top: 6px;
-        font-size: 13px;
         color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
       }
 
-      .hero-panel {
+      .hero-side {
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
-        gap: 18px;
-        padding: 26px;
-        border-radius: 28px;
+        gap: 16px;
+      }
+
+      .ring-panel,
+      .note-panel {
+        padding: 24px;
+        border-radius: 26px;
+        border: 1px solid var(--line);
         background:
-          linear-gradient(180deg, rgba(31, 122, 116, 0.1), rgba(31, 122, 116, 0.02)),
-          var(--panel-strong);
-        border: 1px solid rgba(31, 122, 116, 0.16);
+          linear-gradient(180deg, rgba(29, 122, 115, 0.08), rgba(29, 122, 115, 0.02)),
+          var(--surface);
       }
 
       .ring {
-        --value: 68;
-        width: 182px;
-        height: 182px;
-        border-radius: 50%;
+        --value: 74;
+        width: 186px;
+        height: 186px;
         margin: 0 auto;
+        border-radius: 50%;
         display: grid;
         place-items: center;
         background:
-          radial-gradient(circle at center, var(--panel-strong) 0 58%, transparent 59% 100%),
+          radial-gradient(circle at center, var(--surface-strong) 0 58%, transparent 59% 100%),
           conic-gradient(var(--accent) calc(var(--value) * 1%), rgba(30, 36, 48, 0.08) 0);
       }
 
@@ -176,24 +171,28 @@
       .ring small {
         display: block;
         margin-top: 4px;
-        font-size: 12px;
+        text-align: center;
         color: var(--muted);
+        font-size: 12px;
         letter-spacing: 0.08em;
       }
 
-      .hero-panel ul {
-        margin: 0;
-        padding-left: 18px;
+      .note-panel ul,
+      .list,
+      .timeline,
+      .risk-list {
+        margin: 14px 0 0;
+        padding-left: 20px;
         color: var(--muted);
-        line-height: 1.7;
+        line-height: 1.8;
       }
 
       .section {
-        margin-top: 26px;
+        margin-top: 24px;
         padding: 28px;
         border-radius: var(--radius-xl);
-        background: var(--panel);
-        border: 1px solid rgba(255, 255, 255, 0.56);
+        border: 1px solid rgba(255, 255, 255, 0.58);
+        background: var(--surface);
         box-shadow: var(--shadow);
         backdrop-filter: blur(10px);
       }
@@ -202,7 +201,7 @@
         display: flex;
         align-items: end;
         justify-content: space-between;
-        gap: 18px;
+        gap: 16px;
         margin-bottom: 18px;
       }
 
@@ -216,154 +215,27 @@
         font-size: 15px;
       }
 
-      .status-grid {
+      .overview {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 14px;
-      }
-
-      .status-card {
-        padding: 20px;
-        border-radius: 20px;
-        border: 1px solid var(--line);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 243, 235, 0.9));
-      }
-
-      .status-card .score {
-        display: inline-flex;
-        align-items: baseline;
-        gap: 6px;
-        font-size: 32px;
-        font-weight: 700;
-      }
-
-      .status-card .score small {
-        font-size: 13px;
-        color: var(--muted);
-        font-weight: 600;
-      }
-
-      .status-card h3 {
-        margin-top: 16px;
-        font-size: 18px;
-      }
-
-      .status-card p {
-        margin-top: 10px;
-        color: var(--muted);
-        line-height: 1.7;
-        font-size: 14px;
-      }
-
-      .meter {
-        height: 10px;
-        margin-top: 16px;
-        border-radius: 999px;
-        background: rgba(30, 36, 48, 0.08);
-        overflow: hidden;
-      }
-
-      .meter > span {
-        display: block;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, var(--accent), var(--accent-soft));
-      }
-
-      .evidence {
-        display: grid;
-        grid-template-columns: 0.9fr 1.1fr;
+        grid-template-columns: 1.12fr 0.88fr;
         gap: 18px;
       }
 
-      .evidence-box,
-      .timeline,
-      .ship-card,
-      .risk-card {
+      .panel {
         padding: 22px;
         border-radius: 22px;
         border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.66);
+        background: rgba(255, 255, 255, 0.68);
       }
 
-      .evidence-box h3,
-      .timeline h3,
-      .ship-card h3,
-      .risk-card h3 {
-        font-size: 19px;
+      .panel h3 {
+        font-size: 20px;
       }
 
-      .checklist,
-      .risk-list,
-      .evidence-list {
-        margin: 14px 0 0;
-        padding-left: 20px;
+      .panel p {
+        margin-top: 12px;
         color: var(--muted);
-        line-height: 1.8;
-      }
-
-      .pipeline {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 16px;
-      }
-
-      .step {
-        position: relative;
-        min-height: 158px;
-        padding: 18px;
-        border-radius: 20px;
-        border: 1px solid var(--line);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 240, 232, 0.85));
-      }
-
-      .step strong {
-        display: block;
-        font-size: 14px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--teal);
-      }
-
-      .step h3 {
-        margin-top: 10px;
-        font-size: 18px;
-      }
-
-      .step p {
-        margin-top: 10px;
-        font-size: 14px;
-        line-height: 1.7;
-        color: var(--muted);
-      }
-
-      .step::after {
-        content: "→";
-        position: absolute;
-        top: 18px;
-        right: -9px;
-        width: 24px;
-        height: 24px;
-        display: grid;
-        place-items: center;
-        border-radius: 999px;
-        background: var(--panel-strong);
-        border: 1px solid var(--line);
-        color: var(--accent);
-        font-size: 14px;
-      }
-
-      .step:last-child::after {
-        display: none;
-      }
-
-      .two-col {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 18px;
+        line-height: 1.75;
       }
 
       .tag-row {
@@ -378,48 +250,175 @@
         align-items: center;
         padding: 8px 11px;
         border-radius: 999px;
-        background: rgba(31, 122, 116, 0.09);
-        color: #225954;
         font-size: 13px;
+        background: rgba(29, 122, 115, 0.09);
+        color: #225b55;
       }
 
-      .risk {
-        margin-top: 12px;
-        padding: 14px 16px;
-        border-left: 4px solid var(--gold);
-        border-radius: 14px;
-        background: rgba(216, 161, 45, 0.11);
-        color: #6b5315;
+      .progress-grid,
+      .roadmap-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .progress-card,
+      .roadmap-card,
+      .evidence-card,
+      .risk-card {
+        padding: 20px;
+        border-radius: 20px;
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 240, 232, 0.88));
+      }
+
+      .progress-card .score {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        font-size: 32px;
+        font-weight: 700;
+      }
+
+      .progress-card .score small {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .progress-card h3,
+      .roadmap-card h3,
+      .evidence-card h3,
+      .risk-card h3 {
+        margin-top: 14px;
+        font-size: 18px;
+      }
+
+      .progress-card p,
+      .roadmap-card p,
+      .evidence-card p,
+      .risk-card p {
+        margin-top: 10px;
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 14px;
+      }
+
+      .meter {
+        height: 10px;
+        margin-top: 16px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(30, 36, 48, 0.08);
+      }
+
+      .meter > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+      }
+
+      .pipeline {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .step {
+        position: relative;
+        min-height: 166px;
+        padding: 18px;
+        border-radius: 20px;
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 240, 232, 0.86));
+      }
+
+      .step strong {
+        display: block;
+        color: var(--teal);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .step h3 {
+        margin-top: 10px;
+        font-size: 18px;
+      }
+
+      .step p {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 14px;
         line-height: 1.7;
       }
 
-      code {
-        padding: 0.15em 0.42em;
-        border-radius: 8px;
-        background: rgba(30, 36, 48, 0.08);
-        font-family: "SFMono-Regular", "SF Mono", "JetBrains Mono", "Menlo",
-          monospace;
-        font-size: 0.92em;
+      .step::after {
+        content: "→";
+        position: absolute;
+        top: 18px;
+        right: -9px;
+        width: 24px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--surface-strong);
+        color: var(--accent);
+        font-size: 14px;
+      }
+
+      .step:last-child::after {
+        display: none;
+      }
+
+      .evidence-grid,
+      .risk-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .callout {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border-left: 4px solid var(--gold);
+        border-radius: 14px;
+        background: rgba(183, 134, 40, 0.12);
+        color: #6d5318;
+        line-height: 1.7;
+      }
+
+      .warn {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border-left: 4px solid var(--rose);
+        border-radius: 14px;
+        background: rgba(176, 79, 79, 0.11);
+        color: #7c3434;
+        line-height: 1.7;
       }
 
       .footer-note {
-        margin-top: 26px;
+        margin-top: 24px;
         color: var(--muted);
         text-align: center;
         font-size: 14px;
         line-height: 1.8;
       }
 
-      @media (max-width: 980px) {
+      @media (max-width: 1040px) {
         .hero,
-        .evidence,
-        .two-col,
-        .status-grid,
-        .pipeline {
-          grid-template-columns: 1fr;
-        }
-
-        .hero-summary {
+        .overview,
+        .evidence-grid,
+        .risk-grid,
+        .pipeline,
+        .progress-grid,
+        .roadmap-grid,
+        .hero-metrics {
           grid-template-columns: 1fr;
         }
 
@@ -433,93 +432,83 @@
     <main class="page">
       <section class="hero">
         <div>
-          <div class="eyebrow">M-SAgent / 进度快照 / 2026-04-15</div>
-          <h1>当前主线已经能跑通，<br />但它更像一套 V1 内核，而不是完整产品。</h1>
+          <div class="eyebrow">M-SAgent / 仓库现状快照 / 2026-04-16</div>
+          <h1>它已经不是原型，<br />但也还没到“成品网页平台”。</h1>
           <p>
-            这次判断基于仓库现状做静态审查，再结合本地测试结果得出。
-            结论很明确：M-SAgent 的核心编排、模块契约、CLI/API 薄服务层、
-            embedded locator 评测闭环都已经成形；但 Web 产品化、配置接入、
-            多 route 扩展和真实环境默认可用性还没有完全收口。
+            我按当前仓库做了一轮静态审查，并实际跑了仓库自带的 Python 3.10
+            检查与 unittest。结论很清楚：M-SAgent 的新主线已经具备可运行的 V1
+            研究内核，主链路、模块边界、调试网页和测试护栏都已落地；但要把它变成面向普通用户的完整在线产品，还差配置体验、真实链路默认可用性和更完整的 Web 工作流。
           </p>
 
-          <div class="hero-summary">
-            <div class="mini-stat">
-              <strong>113</strong>
-              <span>全量 unittest 当前通过，另有 4 个 opt-in real smoke 被跳过</span>
+          <div class="hero-metrics">
+            <div class="metric">
+              <strong>122</strong>
+              <span>当前全量 unittest 通过，另有 4 个 opt-in real smoke 被跳过</span>
             </div>
-            <div class="mini-stat">
-              <strong>52</strong>
-              <span>当前主线 Python 源文件，说明新内核已经不是单文件原型</span>
+            <div class="metric">
+              <strong>54</strong>
+              <span>主线 Python 源文件，说明新架构已经是成体系实现</span>
             </div>
-            <div class="mini-stat">
-              <strong>14</strong>
-              <span>测试文件覆盖 service、assembly、runtime、adapter、eval</span>
+            <div class="metric">
+              <strong>15</strong>
+              <span>测试文件覆盖 assembly、API、adapter、runtime、eval 和纵切链路</span>
             </div>
           </div>
         </div>
 
-        <aside class="hero-panel">
-          <div class="ring" style="--value: 68">
-            <div>
-              <span>68%</span>
-              <small>综合完成度估算</small>
+        <aside class="hero-side">
+          <div class="ring-panel">
+            <div class="ring" style="--value: 74">
+              <div>
+                <span>74%</span>
+                <small>综合完成度估算</small>
+              </div>
             </div>
           </div>
-          <ul>
-            <li>如果把目标定义为“V1 可运行研究内核”，它已经接近可交付。</li>
-            <li>如果把目标定义为“面向用户的完整网页产品”，进度还明显没到尾声。</li>
-            <li>旧版产品形态主要沉淀在 <code>old/</code>，当前主线已经切到新架构。</li>
-          </ul>
+
+          <div class="note-panel">
+            <h3>一句话判断</h3>
+            <ul>
+              <li>按“V1 研发内核”来算，它已经接近可持续迭代阶段。</li>
+              <li>按“可直接交付的终端产品”来算，它还处在补外层体验的中后段。</li>
+              <li><code>old/</code> 保留的是旧产品形态，新主线已经切到 <code>src/msagent</code>。</li>
+            </ul>
+          </div>
         </aside>
       </section>
 
       <section class="section">
         <div class="section-head">
           <div>
-            <h2>完成度拆解</h2>
-            <p class="section-subtitle">不是简单算功能数量，而是按“主链是否能独立成立”来估。</p>
+            <h2>项目现在是什么</h2>
+            <p class="section-subtitle">先给项目一个清晰定位，再谈完成度。</p>
           </div>
         </div>
 
-        <div class="status-grid">
-          <article class="status-card">
-            <div class="score">85 <small>/ 100</small></div>
-            <h3>V1 内核主链</h3>
+        <div class="overview">
+          <article class="panel">
+            <h3>它的核心目标</h3>
             <p>
-              orchestrator、query understanding、proposal、prompt bridge、segmenter、evaluator
-              已经按清晰边界串起来，支持失败感知重试和 artifact 记账。
+              M-SAgent 是一个面向指代表达分割的多模块 Agent
+              系统。它把语言理解、候选区域 proposal、prompt bridge、分割执行和自评估串成一条可重试主链，不是只靠一个入口函数硬跑到结果。
             </p>
-            <div class="meter"><span style="width: 85%"></span></div>
+            <div class="tag-row">
+              <span class="tag">Query Understanding</span>
+              <span class="tag">Proposal Engine</span>
+              <span class="tag">Prompt Bridge</span>
+              <span class="tag">Segmenter</span>
+              <span class="tag">Evaluator</span>
+            </div>
           </article>
 
-          <article class="status-card">
-            <div class="score">72 <small>/ 100</small></div>
-            <h3>真实模型接入</h3>
+          <article class="panel">
+            <h3>它目前最像什么</h3>
             <p>
-              embedded locator runtime、真实 SAM3、真实 Qwen adapter 都留好了装配入口，
-              也有 opt-in smoke；但默认并不要求完整真实环境。
+              现在的仓库更像“有清晰边界、能演示、能回归的研发主干”，而不是面向外部用户的完整平台。CLI、API 和调试网页都已具备，但网页仍偏研发调试视角，完整任务管理、上传流和产品化体验还没有全部接回。
             </p>
-            <div class="meter"><span style="width: 72%"></span></div>
-          </article>
-
-          <article class="status-card">
-            <div class="score">80 <small>/ 100</small></div>
-            <h3>评测与回归</h3>
-            <p>
-              Python 3.10 guard、API smoke、assembly 测试、embedded locator eval harness
-              都已经在仓库里落地，研发闭环比“纯骨架项目”成熟得多。
-            </p>
-            <div class="meter"><span style="width: 80%"></span></div>
-          </article>
-
-          <article class="status-card">
-            <div class="score">35 <small>/ 100</small></div>
-            <h3>网页产品化</h3>
-            <p>
-              当前主线只有最小 FastAPI transport，接口也只有 <code>/health</code> 和
-              <code>/tasks/run</code>。旧前端在 <code>old/frontend</code>，现主线未接回。
-            </p>
-            <div class="meter"><span style="width: 35%"></span></div>
+            <div class="callout">
+              也就是说，它最难的部分已经不是“有没有结构”，而是“怎么把这套结构包装成更顺手的产品”。
+            </div>
           </article>
         </div>
       </section>
@@ -527,8 +516,56 @@
       <section class="section">
         <div class="section-head">
           <div>
-            <h2>它现在到底是什么状态</h2>
-            <p class="section-subtitle">一句话：主流程能跑，结构很清楚，但产品层仍在回填。</p>
+            <h2>完成度拆解</h2>
+            <p class="section-subtitle">我按“主链独立成立的程度”来评估，而不是机械数功能点。</p>
+          </div>
+        </div>
+
+        <div class="progress-grid">
+          <article class="progress-card">
+            <div class="score">88 <small>/ 100</small></div>
+            <h3>V1 主链内核</h3>
+            <p>
+              orchestrator、retry policy、artifact 记账和五段式模块边界都已经站住，主链不是概念图，而是能真的串起来跑。
+            </p>
+            <div class="meter"><span style="width: 88%"></span></div>
+          </article>
+
+          <article class="progress-card">
+            <div class="score">76 <small>/ 100</small></div>
+            <h3>真实能力接入</h3>
+            <p>
+              Qwen、SAM3、embedded locator 都有真实 adapter 和装配入口，也有 opt-in smoke；但默认体验仍以可回退、可调试为主。
+            </p>
+            <div class="meter"><span style="width: 76%"></span></div>
+          </article>
+
+          <article class="progress-card">
+            <div class="score">84 <small>/ 100</small></div>
+            <h3>测试与护栏</h3>
+            <p>
+              Python 3.10 guard、全量 unittest、API integration、assembly
+              smoke、embedded locator eval harness 都已经在仓库里成形。
+            </p>
+            <div class="meter"><span style="width: 84%"></span></div>
+          </article>
+
+          <article class="progress-card">
+            <div class="score">53 <small>/ 100</small></div>
+            <h3>网页产品化</h3>
+            <p>
+              现主线已有可用的调试网页、任务报告展示和本地图片预览，但仍偏研发工具，离完整产品前台还有明显距离。
+            </p>
+            <div class="meter"><span style="width: 53%"></span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>主流程已经走到哪一步</h2>
+            <p class="section-subtitle">这一段是我判断“它已经能跑”的核心依据。</p>
           </div>
         </div>
 
@@ -536,27 +573,31 @@
           <article class="step">
             <strong>Step 01</strong>
             <h3>Query Understanding</h3>
-            <p>把原始表达整理成轻量语义对象，强调结构化输入，而不是直接在入口里硬编码逻辑。</p>
+            <p>把原始 query 结构化成 V1 可消费对象，不把语义判断散落在服务层。</p>
           </article>
+
           <article class="step">
             <strong>Step 02</strong>
             <h3>Proposal Engine</h3>
-            <p>当前主路由是 <code>LOCATE</code>，真正已打通的是定位路线，<code>CROP</code> 和 <code>REWRITE</code> 还只是预留。</p>
+            <p>当前真正打通的是 <code>LOCATE</code> 路线；其他 route 仍以边界预留为主。</p>
           </article>
+
           <article class="step">
             <strong>Step 03</strong>
             <h3>Prompt Bridge</h3>
-            <p>这是 V1 的关键层，把 proposal 转成 segmenter 可稳定消费的 prompt package。</p>
+            <p>把 proposal 转成分割器可稳定消费的提示包，这是当前 V1 串联稳定性的关键层。</p>
           </article>
+
           <article class="step">
             <strong>Step 04</strong>
             <h3>Segment + Evaluate</h3>
-            <p>SAM 分割和 LLM evaluator 都已挂上统一 adapter，失败时由 orchestrator 决定是否重试。</p>
+            <p>SAM 分割与 LLM evaluator 已统一挂在 adapter 边界上，失败时由 orchestrator 决定是否重试。</p>
           </article>
+
           <article class="step">
             <strong>Step 05</strong>
-            <h3>Artifacts + Report</h3>
-            <p>本地 artifact store 和 demo report 已经能沉淀任务摘要，便于继续做可视化与追踪。</p>
+            <h3>Artifact + Report</h3>
+            <p>本地 artifact store、Markdown report 和 API report payload 已经能沉淀过程摘要，网页也可直接消费。</p>
           </article>
         </div>
       </section>
@@ -564,75 +605,29 @@
       <section class="section">
         <div class="section-head">
           <div>
-            <h2>判断依据</h2>
-            <p class="section-subtitle">这不是凭感觉打分，而是基于当前仓库能看到和能跑到的证据。</p>
+            <h2>这次判断基于哪些证据</h2>
+            <p class="section-subtitle">不是印象分，是按仓库里看得到、跑得到的内容来定。</p>
           </div>
         </div>
 
-        <div class="evidence">
-          <div class="evidence-box">
-            <h3>本次快照里的硬证据</h3>
-            <ul class="evidence-list">
-              <li><code>./scripts/check_py310.sh</code> 已通过，Python 3.10 guard 与 API smoke 正常。</li>
-              <li><code>python3.10 -m unittest discover -s tests</code> 当前结果为 <code>Ran 113 tests ... OK (skipped=4)</code>。</li>
-              <li><code>src/msagent/service/assembly.py</code> 已经具备 mock / real runtime 的装配切换。</li>
-              <li><code>src/msagent/orchestrator/orchestrator.py</code> 明确掌控 stage 推进、失败终止与 retry 决策。</li>
-              <li><code>src/msagent/evals/embedded_locator.py</code> 说明项目不只在写主链，还在做独立评测闭环。</li>
+        <div class="evidence-grid">
+          <article class="evidence-card">
+            <h3>实际跑过的检查</h3>
+            <ul class="list">
+              <li><code>scripts/check_py310.sh</code> 已通过。</li>
+              <li>脚本内含 ruff 语法检查、Python 3.10 guardrail、最小纵切测试和 API smoke。</li>
+              <li><code>python3.10 -m unittest discover -s tests -p "test_*.py"</code> 当前结果为 <code>Ran 122 tests ... OK (skipped=4)</code>。</li>
             </ul>
-          </div>
-
-          <div class="timeline">
-            <h3>我对仓库状态的解读</h3>
-            <ul class="checklist">
-              <li>旧版仓库追求“完整产品形态”，包括前端和完整 Web 任务流。</li>
-              <li>当前主线更重视“新架构 V1 的稳定边界”，先把 contracts、orchestrator、runtime boundary 理顺。</li>
-              <li>这类仓库通常意味着架构重建阶段已经过半，正在从“内核成立”走向“外层补齐”。</li>
-              <li>所以它不是没做完，而是做到了一个非常明确的中间态：研究内核先行，产品层后补。</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <h2>已经扎实完成的部分</h2>
-            <p class="section-subtitle">这些部分不是 PPT 架构，而是已经在代码和测试里站住了。</p>
-          </div>
-        </div>
-
-        <div class="two-col">
-          <article class="ship-card">
-            <h3>主干已经具备可演示能力</h3>
-            <ul class="checklist">
-              <li>CLI 与 API service 都能从输入请求组装出标准 RunTask。</li>
-              <li>任务会经过理解、proposal、prompt bridge、分割、评估的完整链路。</li>
-              <li>artifact store 支持把中间结果与最终结果落盘并可回读。</li>
-              <li>demo report 已能把任务过程渲染为 Markdown 摘要。</li>
-            </ul>
-            <div class="tag-row">
-              <span class="tag">CLI</span>
-              <span class="tag">API</span>
-              <span class="tag">Retry Policy</span>
-              <span class="tag">Artifact Store</span>
-              <span class="tag">Demo Report</span>
-            </div>
           </article>
 
-          <article class="ship-card">
-            <h3>研发基础设施已经不像“草台班子”</h3>
-            <ul class="checklist">
-              <li>仓库强制以 Python 3.10 为基线，并有 guardrail 脚本兜底。</li>
-              <li>有最小纵切测试，也有 API、assembly、adapter、eval 级测试。</li>
-              <li>real smoke 被做成 opt-in，不会拖垮默认 CI 或本地轻量检查。</li>
-              <li>架构文档比较完整，当前实现和文档的对齐度也不错。</li>
+          <article class="evidence-card">
+            <h3>代码层的硬信号</h3>
+            <ul class="list">
+              <li><code>src/msagent/orchestrator/orchestrator.py</code> 明确掌控 stage 推进、失败终止和 retry 决策。</li>
+              <li><code>src/msagent/service/assembly.py</code> 默认要求真实 runtime 配置或显式注入测试替身。</li>
+              <li><code>src/msagent/service/api_transport.py</code> 已提供 <code>/</code>、<code>/health</code>、<code>/tasks/run</code> 和本地调试预览入口。</li>
+              <li><code>src/msagent/service/web_visualizer.html</code> 说明现主线已经有绑定新架构的调试前端，而不只是旧版遗产。</li>
             </ul>
-            <div class="tag-row">
-              <span class="tag">Py310 Guard</span>
-              <span class="tag">Unit Tests</span>
-              <span class="tag">Real Smoke</span>
-              <span class="tag">Architecture Docs</span>
-            </div>
           </article>
         </div>
       </section>
@@ -640,33 +635,64 @@
       <section class="section">
         <div class="section-head">
           <div>
-            <h2>还没有收口的部分</h2>
-            <p class="section-subtitle">这部分正是为什么我不建议把它称作“已经完工的网页产品”。</p>
+            <h2>已经做扎实的部分</h2>
+            <p class="section-subtitle">这些内容已经不再是“想法”，而是当前仓库真正能依赖的基础。</p>
           </div>
         </div>
 
-        <div class="two-col">
+        <div class="evidence-grid">
+          <article class="evidence-card">
+            <h3>研发主干已经成立</h3>
+            <ul class="timeline">
+              <li>CLI 与 API 都能组装标准 <code>RunTask</code> 并走完整主链。</li>
+              <li>artifact store 能把中间结果与最终结果落盘并回读。</li>
+              <li>demo report / task visuals 已经让网页展示主链摘要成为可能。</li>
+              <li>embedded locator 的独立 eval harness 表明项目已经进入回归思维，而不只是堆功能。</li>
+            </ul>
+          </article>
+
+          <article class="evidence-card">
+            <h3>调试体验已经有雏形</h3>
+            <ul class="timeline">
+              <li>根路由可直接打开调试网页，看最近一次任务摘要。</li>
+              <li>网页支持保存多个 case、顺序跑全部、查看 attempt timeline。</li>
+              <li>本地图片路径可以通过后端预览接口直接加载，适合研发调试。</li>
+              <li>当前网页已经和 API report 结构衔接上，不是静态摆设。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>还没收口的部分</h2>
+            <p class="section-subtitle">这也是为什么我不把它定义成“已经完工的产品”。</p>
+          </div>
+        </div>
+
+        <div class="risk-grid">
           <article class="risk-card">
             <h3>产品层缺口</h3>
             <ul class="risk-list">
-              <li>当前主线 API 很薄，离上传、队列、WebSocket、结果下载等完整交互还有距离。</li>
-              <li>现主线没有接回可直接展示的前端；旧版前端更多是参考资产，不是现在的集成结果。</li>
-              <li>配置系统还是结构化 dataclass 为主，环境变量/配置文件解析没有完全落地。</li>
+              <li>当前网页更偏调试控制台，不是完整的上传式、面向普通用户的操作前台。</li>
+              <li>任务管理仍是同步 <code>/tasks/run</code> 风格，缺少更完整的上传、排队、结果下载闭环。</li>
+              <li>根目录缺少一份面向新主线的正式 README，项目入口知识主要分散在代码和架构文档中。</li>
             </ul>
-            <div class="risk">
-              换句话说，仓库现在更适合开发者演示和继续研发，不是直接给非技术用户开箱即用。
+            <div class="warn">
+              也就是说，现在已经适合研发同学继续推进，但还不是“别人一拿就顺滑上手”的状态。
             </div>
           </article>
 
           <article class="risk-card">
             <h3>能力层缺口</h3>
             <ul class="risk-list">
-              <li><code>ProposalRoute.LOCATE</code> 是当前唯一真正实现的路线，<code>CROP</code> / <code>REWRITE</code> 仍是预留接口。</li>
-              <li>很多真实能力默认仍通过 mock 装配回退，说明“默认可运行”和“默认真实可用”不是一回事。</li>
-              <li>全量测试虽然都过了，但 4 个 real smoke 仍是 opt-in，默认结果不能代表真实模型环境全绿。</li>
+              <li><code>ProposalRoute.LOCATE</code> 是当前唯一真正落地的主路线，其他 route 还在边界层。</li>
+              <li>4 个 real smoke 仍是 opt-in，这说明真实模型环境的默认可运行性还没有收束到无脑开箱。</li>
+              <li>真实模型路径、运行模式和部署体验虽然有配置结构，但离“统一启动说明”还差一步。</li>
             </ul>
-            <div class="risk">
-              这不算坏事，反而说明项目在控制复杂度；只是它还处在“可进化内核”而不是“稳定成品”的阶段。
+            <div class="callout">
+              这不是坏消息，反而说明项目正在先把内核稳住，再把复杂外层一层层接回去。
             </div>
           </article>
         </div>
@@ -675,38 +701,38 @@
       <section class="section">
         <div class="section-head">
           <div>
-            <h2>接下来最值得补的 3 件事</h2>
-            <p class="section-subtitle">如果要把 68% 往 85% 推，这三个方向性价比最高。</p>
+            <h2>接下来最值钱的 4 步</h2>
+            <p class="section-subtitle">它们会直接决定这套内核能不能从 74% 往 85% 以上走。</p>
           </div>
         </div>
 
-        <div class="status-grid">
-          <article class="status-card">
-            <div class="score">01</div>
-            <h3>把现主线网页接回来</h3>
-            <p>基于当前 <code>/tasks/run</code> 和 artifact/report 能力，先做一个真正绑定新架构的前端壳，而不是继续依赖 <code>old/</code>。</p>
+        <div class="roadmap-grid">
+          <article class="roadmap-card">
+            <h3>补正式 README</h3>
+            <p>把新主线的安装、配置、CLI/API 运行方式写成统一入口，降低理解成本。</p>
           </article>
-          <article class="status-card">
-            <div class="score">02</div>
-            <h3>补齐配置与启动体验</h3>
-            <p>把真实模型路径、运行模式、环境变量解析收口到统一入口，让“别人拿到仓库怎么跑”这件事变得明确。</p>
+
+          <article class="roadmap-card">
+            <h3>把网页从调试页推进到产品页</h3>
+            <p>接上上传、结果下载和更明确的任务反馈，让非研发用户也能顺着用。</p>
           </article>
-          <article class="status-card">
-            <div class="score">03</div>
-            <h3>继续做真实链路回归</h3>
-            <p>把 opt-in real smoke 逐步稳定下来，再考虑更完整的回归集，这样 V1 才能从“结构成立”升级到“实战可靠”。</p>
+
+          <article class="roadmap-card">
+            <h3>持续做真实链路回归</h3>
+            <p>把 opt-in real smoke 再稳定一段，再考虑更完整的真实环境回归集。</p>
           </article>
-          <article class="status-card">
-            <div class="score">结论</div>
-            <h3>先成内核，再成产品</h3>
-            <p>当前节奏是对的。项目最难的“结构清晰且能跑起来”已经做到了，接下来主要是把外层体验和默认真实可用性补完整。</p>
+
+          <article class="roadmap-card">
+            <h3>扩 route 能力</h3>
+            <p>当 <code>LOCATE</code> 稳下来后，再把其他 proposal route 从接口层真正推到可运行层。</p>
           </article>
         </div>
       </section>
 
       <p class="footer-note">
-        页面基于 2026-04-15 仓库快照整理。综合结论：<strong>M-SAgent 当前更像“完成度较高的 V1 研发内核”</strong>，
-        如果按研究工程来评估，已经进入可持续迭代阶段；如果按最终产品来评估，还处在从内核走向成品的过渡期。
+        页面基于 2026-04-16 的本地仓库快照整理。我的结论是：
+        <strong>M-SAgent 当前已经是一套完成度不低的 V1 研发内核</strong>；
+        如果按研究工程衡量，它已经过了“能不能站住”这一关；如果按成品网页平台衡量，它正处在把外层体验补齐的关键阶段。
       </p>
     </main>
   </body>

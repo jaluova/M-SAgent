@@ -113,9 +113,4 @@ class RealEmbeddedRuntimeSmokeTests(unittest.TestCase):
         self.assertIs(proposal.status, ProposalStatus.READY)
         self.assertGreaterEqual(len(proposal.candidates), 1)
         self.assertGreaterEqual(len(proposal.candidates[0].positive_point_hints), 1)
-        self.assertTrue(
-            any(
-                diagnostic.startswith("runtime_metadata=")
-                for diagnostic in proposal.diagnostics
-            )
-        )
+        self.assertTrue(any(diagnostic.startswith("selected_k=") for diagnostic in proposal.diagnostics))

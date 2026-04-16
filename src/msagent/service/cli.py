@@ -33,8 +33,8 @@ class CLIRequest:
     query_text: str
     # 用户输入的指代表达。
 
-    max_attempts: int = 3
-    # 当前任务允许的最大尝试次数。
+    max_attempts: int | None = None
+    # 当前任务允许的最大尝试次数；未显式给出时由 service 默认值补齐。
 
     output_dir: str | None = None
     # 结果输出目录，供后续实现时使用。
@@ -43,9 +43,11 @@ class CLIRequest:
 class CLIService:
     """CLI 服务层骨架。"""
 
-    def __init__(self, orchestrator: Orchestrator) -> None:
+    def __init__(self, orchestrator: Orchestrator, *, default_max_attempts: int = 3) -> None:
         self.orchestrator = orchestrator
         # CLI 层只依赖 orchestrator，不直接接触模块细节。
+        self.default_max_attempts = max(1, default_max_attempts)
+        # request 未显式指定 max_attempts 时，回退到装配期默认值。
 
     def build_task(self, request: CLIRequest) -> RunTask:
         """把 CLI 请求转换为 RunTask。"""
@@ -65,7 +67,12 @@ class CLIService:
                 stage=TaskStage.CREATED,
                 status=TaskStatus.PENDING,
                 attempt_index=0,
-                max_attempts=max(1, request.max_attempts),
+                max_attempts=max(
+                    1,
+                    request.max_attempts
+                    if request.max_attempts is not None
+                    else self.default_max_attempts,
+                ),
                 updated_at=now,
             ),
         )

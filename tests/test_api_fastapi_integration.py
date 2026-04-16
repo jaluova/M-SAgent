@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import sys
 from pathlib import Path
@@ -21,20 +22,23 @@ if HAS_FASTAPI and HAS_HTTPX:
 
 from msagent.core.config.settings import MSAgentSettings
 from msagent.core.contracts.types import ProposalResult, ProposalRoute, ProposalStatus
-from msagent.infra.mock_adapters import MockLocatorAdapter
 from msagent.service import build_default_api_service
+from tests.support.deterministic_adapters import (
+    DeterministicLocatorAdapter,
+    make_deterministic_service_adapters,
+)
 
 
 class FakeEmbeddedLocatorRuntimeBundle:
     def __init__(self) -> None:
-        self.locator_adapter = MockLocatorAdapter(backend_name="embedded-locator")
+        self.locator_adapter = DeterministicLocatorAdapter(backend_name="embedded-locator")
         self.close_calls = 0
 
     def close(self) -> None:
         self.close_calls += 1
 
 
-class EmptyLocatorAdapter(MockLocatorAdapter):
+class EmptyLocatorAdapter(DeterministicLocatorAdapter):
     def locate(self, request):
         return ProposalResult(
             proposal_id=f"{request.task_id}-proposal-empty",
@@ -62,11 +66,18 @@ class RealFastAPIIntegrationTests(unittest.TestCase):
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ):
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     app = assembly.create_app()
                     with TestClient(app) as client:
@@ -91,20 +102,98 @@ class RealFastAPIIntegrationTests(unittest.TestCase):
 
         self.assertGreaterEqual(fake_bundle.close_calls, 1)
 
+    def test_real_fastapi_serves_visualizer_and_local_image_preview(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.service.enable_debug_features = True
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
+
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
+            try:
+                app = assembly.create_app()
+                with TestClient(app) as client:
+                    visualizer_response = client.get("/")
+                    self.assertEqual(visualizer_response.status_code, 200)
+                    self.assertIn("M-SAgent Visualizer", visualizer_response.text)
+
+                    image_path = tmp_path / "preview.png"
+                    image_path.write_bytes(
+                        base64.b64decode(
+                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+                            "/w8AAn8B9Wn0jQAAAABJRU5ErkJggg=="
+                        )
+                    )
+                    preview_response = client.get(
+                        "/debug/local-file",
+                        params={"path": str(image_path)},
+                    )
+                    self.assertEqual(preview_response.status_code, 200)
+                    self.assertEqual(preview_response.headers["content-type"], "image/png")
+
+                    text_path = tmp_path / "note.txt"
+                    text_path.write_text("not an image", encoding="utf-8")
+                    bad_preview_response = client.get(
+                        "/debug/local-file",
+                        params={"path": str(text_path)},
+                    )
+                    self.assertEqual(bad_preview_response.status_code, 400)
+            finally:
+                assembly.close()
+
+    def test_real_fastapi_hides_debug_routes_when_debug_features_are_disabled(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
+
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
+            try:
+                app = assembly.create_app()
+                with TestClient(app) as client:
+                    self.assertEqual(client.get("/").status_code, 404)
+                    self.assertEqual(client.get("/debug/local-file").status_code, 404)
+            finally:
+                assembly.close()
+
     def test_real_fastapi_failure_and_bad_request_paths(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             with patch(
                 "msagent.service.assembly._build_default_locator_adapter",
                 return_value=(
                     EmptyLocatorAdapter(backend_name="empty-locator"),
                     None,
-                    ["embedded_locator_runtime=disabled"],
+                    ["embedded_locator_runtime=custom"],
                 ),
             ):
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     app = assembly.create_app()
                     with TestClient(app) as client:

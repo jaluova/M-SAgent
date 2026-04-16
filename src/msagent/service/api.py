@@ -18,7 +18,9 @@ from msagent.core.contracts.common import ArtifactRef, ImageRef
 from msagent.core.task.enums import StopReason, TaskSource, TaskStage, TaskStatus
 from msagent.core.task.models import RunTask
 from msagent.core.task.models import RunTaskIdentity, RunTaskRequest, RunTaskRuntime
+from msagent.infra.adapters import ArtifactStore
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestrationResult
+from msagent.service.demo_report import DemoTaskReport, build_demo_task_report
 
 
 @dataclass(slots=True)
@@ -31,8 +33,8 @@ class APIRequest:
     query_text: str
     # 用户原始指代表达。
 
-    max_attempts: int = 3
-    # 当前请求允许的最大尝试次数。
+    max_attempts: int | None = None
+    # 当前请求允许的最大尝试次数；未显式给出时由 service 默认值补齐。
 
     request_metadata: dict[str, object] = field(default_factory=dict)
     # API 网关或前端透传的请求元数据。
@@ -54,13 +56,29 @@ class APIResponse:
     result_refs: list[str] = field(default_factory=list)
     # 结果与关键产物引用列表，便于前端二次拉取。
 
+    report: DemoTaskReport | None = None
+    # 面向调试与可视化前端的结构化迭代报告。
+
 
 class APIService:
     """API 服务层骨架。"""
 
-    def __init__(self, orchestrator: Orchestrator) -> None:
+    def __init__(
+        self,
+        orchestrator: Orchestrator,
+        artifact_store: ArtifactStore | None = None,
+        *,
+        include_debug_report: bool = False,
+        default_max_attempts: int = 3,
+    ) -> None:
         self.orchestrator = orchestrator
         # API 层只依赖 orchestrator，避免推理逻辑渗入接口层。
+        self.artifact_store = artifact_store
+        # 若存在 artifact store，则允许把结构化迭代摘要返回给前端。
+        self.include_debug_report = include_debug_report
+        # 调试报告只在显式 debug 模式下对外返回。
+        self.default_max_attempts = max(1, default_max_attempts)
+        # request 未显式指定 max_attempts 时，回退到装配期默认值。
 
     def build_task(self, request: APIRequest) -> RunTask:
         """把 API 请求转换为 RunTask。"""
@@ -96,7 +114,12 @@ class APIService:
                 stage=TaskStage.CREATED,
                 status=TaskStatus.PENDING,
                 attempt_index=0,
-                max_attempts=max(1, request.max_attempts),
+                max_attempts=max(
+                    1,
+                    request.max_attempts
+                    if request.max_attempts is not None
+                    else self.default_max_attempts,
+                ),
                 updated_at=now,
             ),
         )
@@ -114,6 +137,11 @@ class APIService:
             status=task.runtime.status.value,
             summary=self._build_safe_summary(task),
             result_refs=self._collect_result_refs(task),
+            report=(
+                build_demo_task_report(result, artifact_store=self.artifact_store)
+                if self.include_debug_report and self.artifact_store is not None
+                else None
+            ),
         )
 
     def _collect_result_refs(self, task: RunTask) -> list[str]:

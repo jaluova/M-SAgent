@@ -87,4 +87,6 @@ class EvaluationAdapterRequest:
     prompt_package: PromptPackage
     proposal: ProposalResult | None = None
     understanding: QueryUnderstandingResult | None = None
+    primary_mask_summary: str | None = None
+    mask_quality_warnings: list[str] = field(default_factory=list)
     trace_context: TraceContext | None = None

@@ -9,8 +9,19 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+import ipaddress
+import mimetypes
+from pathlib import Path
 
 from msagent.service.api import APIRequest, APIResponse, APIService
+from msagent.service.web_ui import load_visualizer_html
+
+try:  # pragma: no cover - exercised via create_fastapi_app import path
+    from fastapi import Request as FastAPIRequest
+except ImportError:  # pragma: no cover - fastapi is optional for this module
+    FastAPIRequest = object
+
+_MISSING = object()
 
 
 @dataclass(slots=True)
@@ -24,8 +35,10 @@ class APIHandler:
         image_uri = self._require_str(payload, "image_uri")
         query_text = self._require_str(payload, "query_text")
 
-        max_attempts_object = payload.get("max_attempts", 3)
-        if not isinstance(max_attempts_object, int) or isinstance(max_attempts_object, bool):
+        max_attempts_object = payload.get("max_attempts", _MISSING)
+        if max_attempts_object is not _MISSING and (
+            not isinstance(max_attempts_object, int) or isinstance(max_attempts_object, bool)
+        ):
             raise ValueError("Field 'max_attempts' must be an integer.")
 
         request_metadata_object = payload.get("request_metadata", {})
@@ -35,7 +48,9 @@ class APIHandler:
         return APIRequest(
             image_uri=image_uri,
             query_text=query_text,
-            max_attempts=max_attempts_object,
+            max_attempts=(
+                None if max_attempts_object is _MISSING else max_attempts_object
+            ),
             request_metadata=dict(request_metadata_object),
         )
 
@@ -57,6 +72,7 @@ def create_fastapi_app(
     handler: APIHandler,
     *,
     on_shutdown: Callable[[], None] | None = None,
+    enable_debug_features: bool = False,
 ) -> object:
     """创建 FastAPI app。
 
@@ -93,4 +109,48 @@ def create_fastapi_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if enable_debug_features:
+
+        @app.get("/")
+        def visualizer(request: FastAPIRequest):
+            from fastapi.responses import HTMLResponse
+
+            _require_local_debug_client(request, HTTPException)
+            return HTMLResponse(load_visualizer_html())
+
+        @app.get("/debug/local-file")
+        def debug_local_file(path: str, request: FastAPIRequest):
+            from fastapi.responses import FileResponse
+
+            _require_local_debug_client(request, HTTPException)
+
+            resolved = Path(path).expanduser().resolve()
+            if not resolved.is_file():
+                raise HTTPException(status_code=404, detail="Local file not found.")
+
+            media_type, _ = mimetypes.guess_type(resolved.name)
+            if media_type is None or not media_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="Only image files can be previewed.")
+
+            return FileResponse(
+                str(resolved),
+                media_type=media_type,
+                filename=resolved.name,
+            )
+
     return app
+
+
+def _require_local_debug_client(request: object, http_exception_type: type[Exception]) -> None:
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", None)
+    if host is None:
+        raise http_exception_type(status_code=403, detail="Debug UI is restricted to local clients.")
+    if host == "testclient":
+        return
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return
+    except ValueError:
+        pass
+    raise http_exception_type(status_code=403, detail="Debug UI is restricted to local clients.")

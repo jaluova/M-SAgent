@@ -16,12 +16,16 @@ if str(SRC) not in sys.path:
 from msagent.core.config.settings import MSAgentSettings
 from msagent.core.contracts.types import ProposalResult, ProposalRoute, ProposalStatus
 from msagent.infra.adapters import LocatorAdapter
-from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter
 from msagent.service import build_default_api_service
 from msagent.service.api import APIResponse
+from tests.support.deterministic_adapters import (
+    DeterministicLLMAdapter,
+    DeterministicLocatorAdapter,
+    make_deterministic_service_adapters,
+)
 
 
-class RecordingEmbeddedLocatorAdapter(MockLocatorAdapter):
+class RecordingEmbeddedLocatorAdapter(DeterministicLocatorAdapter):
     def __init__(self) -> None:
         super().__init__(backend_name="embedded-locator")
         self.locate_calls = 0
@@ -41,7 +45,7 @@ class FakeEmbeddedLocatorRuntimeBundle:
         self.closed = True
 
 
-class RecordingRealLLMAdapter(MockLLMAdapter):
+class RecordingRealLLMAdapter(DeterministicLLMAdapter):
     def __init__(self) -> None:
         super().__init__(backend_name="real-qwen-llm")
         self.query_calls = 0
@@ -65,7 +69,7 @@ class FakeRealLLMAdapterBundle:
         self.closed = True
 
 
-class EmptyLocatorAdapter(MockLocatorAdapter):
+class EmptyLocatorAdapter(DeterministicLocatorAdapter):
     def locate(self, request):
         return ProposalResult(
             proposal_id=f"{request.task_id}-proposal-empty",
@@ -113,6 +117,10 @@ class FakeHTTPException(Exception):
         self.detail = detail
 
 
+class FakeRequest:
+    pass
+
+
 class APIAssemblyTests(unittest.TestCase):
     def test_default_api_service_uses_embedded_locator_when_runtime_is_fully_configured(
         self,
@@ -129,11 +137,18 @@ class APIAssemblyTests(unittest.TestCase):
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ) as build_bundle:
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     response = assembly.handle(
                         {
@@ -152,7 +167,7 @@ class APIAssemblyTests(unittest.TestCase):
         self.assertEqual(assembly.port, 9010)
         self.assertEqual(
             assembly.diagnostics,
-            ["embedded_locator_runtime=enabled", "sam_runtime=disabled"],
+            ["embedded_locator_runtime=enabled", "sam_runtime=custom"],
         )
         self.assertEqual(fake_bundle.locator_adapter.locate_calls, 1)
         self.assertTrue(fake_bundle.closed)
@@ -174,13 +189,20 @@ class APIAssemblyTests(unittest.TestCase):
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.service.enable_real_llm = True
             settings.model_paths.qwen_model_path = "/models/qwen"
+            locator_adapter, _, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle = FakeRealLLMAdapterBundle()
             with patch(
                 "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
                 return_value=fake_bundle,
             ) as build_bundle:
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     response = assembly.handle(
                         {
@@ -195,7 +217,7 @@ class APIAssemblyTests(unittest.TestCase):
         self.assertEqual(response.status, "succeeded")
         self.assertEqual(
             assembly.diagnostics,
-            ["embedded_locator_runtime=disabled", "sam_runtime=disabled"],
+            ["embedded_locator_runtime=custom", "sam_runtime=custom"],
         )
         self.assertEqual(fake_bundle.llm_adapter.query_calls, 1)
         self.assertEqual(fake_bundle.llm_adapter.eval_calls, 1)
@@ -220,10 +242,19 @@ class APIAssemblyTests(unittest.TestCase):
 
     def test_api_handler_rejects_invalid_transport_payload(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-            assembly = build_default_api_service(settings)
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
             try:
                 with self.assertRaisesRegex(ValueError, "request_metadata"):
                     assembly.handle(
@@ -233,15 +264,32 @@ class APIAssemblyTests(unittest.TestCase):
                             "request_metadata": ["not", "an", "object"],
                         }
                     )
+                with self.assertRaisesRegex(ValueError, "max_attempts"):
+                    assembly.handle(
+                        {
+                            "image_uri": "file:///tmp/input.png",
+                            "query_text": "the red cup",
+                            "max_attempts": None,
+                        }
+                    )
             finally:
                 assembly.close()
 
     def test_api_handler_success_path_returns_api_response(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-            assembly = build_default_api_service(settings)
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
             try:
                 response = assembly.handle(
                     {
@@ -256,19 +304,57 @@ class APIAssemblyTests(unittest.TestCase):
         self.assertEqual(response.status, "succeeded")
         self.assertEqual(response.summary, "Task completed successfully.")
 
+    def test_default_api_service_injects_runtime_max_attempts_into_service_defaults(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.runtime.max_attempts = 5
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
+
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
+            try:
+                self.assertEqual(assembly.service.default_max_attempts, 5)
+                request = assembly.handler.build_request(
+                    {
+                        "image_uri": "file:///tmp/input.png",
+                        "query_text": "the red cup",
+                    }
+                )
+                task = assembly.service.build_task(request)
+            finally:
+                assembly.close()
+
+        self.assertEqual(task.runtime.max_attempts, 5)
+
     def test_api_handler_failure_path_returns_api_response(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
             with patch(
                 "msagent.service.assembly._build_default_locator_adapter",
                 return_value=(
                     EmptyLocatorAdapter(backend_name="empty-locator"),
                     None,
-                    ["embedded_locator_runtime=disabled"],
+                    ["embedded_locator_runtime=custom"],
                 ),
             ):
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     response = assembly.handle(
                         {
@@ -285,17 +371,25 @@ class APIAssemblyTests(unittest.TestCase):
 
     def test_api_handler_exception_path_returns_api_response(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
             with patch(
                 "msagent.service.assembly._build_default_locator_adapter",
                 return_value=(
                     FailingLocatorAdapter(backend_name="failing-locator"),
                     None,
-                    ["embedded_locator_runtime=disabled"],
+                    ["embedded_locator_runtime=custom"],
                 ),
             ):
-                assembly = build_default_api_service(settings)
+                assembly = build_default_api_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     response = assembly.handle(
                         {
@@ -314,10 +408,19 @@ class APIAssemblyTests(unittest.TestCase):
 
     def test_api_assembly_create_app_requires_fastapi_dependency(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-            assembly = build_default_api_service(settings)
+            assembly = build_default_api_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
             try:
                 with patch.dict(sys.modules, {"fastapi": None}):
                     with self.assertRaisesRegex(RuntimeError, "FastAPI"):
@@ -336,16 +439,24 @@ class APIAssemblyTests(unittest.TestCase):
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
             fake_fastapi = ModuleType("fastapi")
             fake_fastapi.FastAPI = FakeFastAPIApp
             fake_fastapi.HTTPException = FakeHTTPException
+            fake_fastapi.Request = FakeRequest
 
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ):
                 with patch.dict(sys.modules, {"fastapi": fake_fastapi}):
-                    assembly = build_default_api_service(settings)
+                    assembly = build_default_api_service(
+                        settings,
+                        llm_adapter=llm_adapter,
+                        sam_adapter=sam_adapter,
+                    )
                     try:
                         app = assembly.create_app()
                         self.assertFalse(fake_bundle.closed)

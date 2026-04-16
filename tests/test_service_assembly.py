@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,12 +16,17 @@ if str(SRC) not in sys.path:
 from msagent.core.config.settings import MSAgentSettings, ModelPathConfig
 from msagent.core.contracts.types import ProposalRoute
 from msagent.core.task.enums import TaskStatus
-from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
 from msagent.service import build_default_cli_service
 from msagent.service.cli import CLIRequest
+from tests.support.deterministic_adapters import (
+    DeterministicLLMAdapter,
+    DeterministicLocatorAdapter,
+    DeterministicSAMAdapter,
+    make_deterministic_service_adapters,
+)
 
 
-class RecordingEmbeddedLocatorAdapter(MockLocatorAdapter):
+class RecordingEmbeddedLocatorAdapter(DeterministicLocatorAdapter):
     def __init__(self) -> None:
         super().__init__(backend_name="embedded-locator")
         self.locate_calls = 0
@@ -40,7 +46,7 @@ class FakeEmbeddedLocatorRuntimeBundle:
         self.closed = True
 
 
-class RecordingRealLLMAdapter(MockLLMAdapter):
+class RecordingRealLLMAdapter(DeterministicLLMAdapter):
     def __init__(self) -> None:
         super().__init__(backend_name="real-qwen-llm")
         self.query_calls = 0
@@ -64,7 +70,7 @@ class FakeRealLLMAdapterBundle:
         self.closed = True
 
 
-class RecordingRealSAMAdapter(MockSAMAdapter):
+class RecordingRealSAMAdapter(DeterministicSAMAdapter):
     def __init__(self, artifact_store) -> None:
         super().__init__(
             backend_name="sam3-real",
@@ -95,20 +101,27 @@ class ServiceAssemblyTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.model_paths.qwen_model_path = "/models/qwen"
             settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ) as build_bundle:
-                assembly = build_default_cli_service(settings)
+                assembly = build_default_cli_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     result = assembly.service.run(
                         CLIRequest(
@@ -124,48 +137,46 @@ class ServiceAssemblyTests(unittest.TestCase):
         self.assertIs(assembly.runtime_bundle, fake_bundle)
         self.assertEqual(
             assembly.diagnostics,
-            ["embedded_locator_runtime=enabled", "sam_runtime=disabled"],
+            ["embedded_locator_runtime=enabled", "sam_runtime=custom"],
         )
         self.assertEqual(fake_bundle.locator_adapter.locate_calls, 1)
         self.assertTrue(fake_bundle.closed)
         self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
 
-    def test_default_cli_service_falls_back_to_mock_locator_when_runtime_is_unconfigured(
+    def test_default_cli_service_rejects_unconfigured_locator_runtime(
         self,
     ) -> None:
         with TemporaryDirectory() as tmp_dir:
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
 
-            assembly = build_default_cli_service(settings)
-            try:
-                self.assertIsInstance(assembly.locator_adapter, MockLocatorAdapter)
-                self.assertIsInstance(assembly.sam_adapter, MockSAMAdapter)
-                self.assertIsNone(assembly.runtime_bundle)
-                self.assertEqual(
-                    assembly.diagnostics,
-                    ["embedded_locator_runtime=disabled", "sam_runtime=disabled"],
-                )
-            finally:
-                assembly.close()
+            with self.assertRaisesRegex(ValueError, "locator runtime is not configured"):
+                build_default_cli_service(settings)
 
     def test_default_cli_service_uses_real_llm_when_enabled(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.service.enable_real_llm = True
             settings.model_paths.qwen_model_path = "/models/qwen"
+            locator_adapter, _, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle = FakeRealLLMAdapterBundle()
             with patch(
                 "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
                 return_value=fake_bundle,
             ) as build_bundle:
-                assembly = build_default_cli_service(settings)
+                assembly = build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 try:
                     result = assembly.service.run(
                         CLIRequest(
@@ -179,44 +190,164 @@ class ServiceAssemblyTests(unittest.TestCase):
         build_bundle.assert_called_once()
         self.assertIs(assembly.llm_adapter, fake_bundle.llm_adapter)
         self.assertIs(assembly.llm_bundle, fake_bundle)
-        self.assertIsInstance(assembly.locator_adapter, MockLocatorAdapter)
         self.assertEqual(
             assembly.diagnostics,
-            ["embedded_locator_runtime=disabled", "sam_runtime=disabled"],
+            ["embedded_locator_runtime=custom", "sam_runtime=custom"],
         )
         self.assertTrue(fake_bundle.closed)
         self.assertEqual(fake_bundle.llm_adapter.query_calls, 1)
         self.assertEqual(fake_bundle.llm_adapter.eval_calls, 1)
         self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
 
-    def test_default_cli_service_rejects_real_llm_without_qwen_model_path(self) -> None:
-        settings = MSAgentSettings()
-        settings.service.enable_real_llm = True
+    def test_default_cli_service_reads_real_llm_from_env_when_settings_are_omitted(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            image_path = tmp_path / "input.png"
+            image_path.write_bytes(b"test-image")
 
-        with self.assertRaisesRegex(ValueError, "qwen_model_path"):
-            build_default_cli_service(settings)
+            fake_locator_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            fake_llm_bundle = FakeRealLLMAdapterBundle()
+
+            def build_fake_sam_bundle(*_args, artifact_store, **_kwargs):
+                return FakeRealSAMAdapterBundle(artifact_store)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "MSAGENT_ENABLE_REAL_LLM": "1",
+                    "M_SAGENT_QWEN_MODEL_PATH": "/models/qwen",
+                    "GRIDGROUND_ADAPTER_PATH": "/models/locator.ckpt",
+                    "GRIDGROUND_CONFIG_PATH": "/models/runtime.json",
+                    "M_SAGENT_SAM3_MODEL_PATH": "/models/sam3",
+                    "M_SAGENT_SAM3_CHECKPOINT_PATH": "/models/sam3.pt",
+                    "MSAGENT_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
+                },
+                clear=False,
+            ):
+                with patch(
+                    "msagent.service.assembly.build_embedded_locator_runtime_bundle",
+                    return_value=fake_locator_bundle,
+                ), patch(
+                    "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
+                    return_value=fake_llm_bundle,
+                ) as build_bundle, patch(
+                    "msagent.service.assembly.build_real_sam3_adapter_bundle",
+                    side_effect=build_fake_sam_bundle,
+                ):
+                    assembly = build_default_cli_service()
+                    try:
+                        result = assembly.service.run(
+                            CLIRequest(
+                                image_path=str(image_path),
+                                query_text="the red cup",
+                            )
+                        )
+                    finally:
+                        assembly.close()
+
+        build_bundle.assert_called_once()
+        self.assertIs(assembly.llm_adapter, fake_llm_bundle.llm_adapter)
+        self.assertTrue(fake_llm_bundle.closed)
+        self.assertEqual(assembly.artifact_store.root_uri, str(tmp_path / "artifacts"))
+        self.assertEqual(fake_llm_bundle.llm_adapter.query_calls, 1)
+        self.assertEqual(fake_llm_bundle.llm_adapter.eval_calls, 1)
+        self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
+
+    def test_default_cli_service_reads_max_attempts_from_env_when_request_omits_it(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            image_path = tmp_path / "input.png"
+            image_path.write_bytes(b"test-image")
+
+            fake_locator_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            fake_llm_bundle = FakeRealLLMAdapterBundle()
+
+            def build_fake_sam_bundle(*_args, artifact_store, **_kwargs):
+                return FakeRealSAMAdapterBundle(artifact_store)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "MSAGENT_ENABLE_REAL_LLM": "1",
+                    "M_SAGENT_QWEN_MODEL_PATH": "/models/qwen",
+                    "GRIDGROUND_ADAPTER_PATH": "/models/locator.ckpt",
+                    "GRIDGROUND_CONFIG_PATH": "/models/runtime.json",
+                    "M_SAGENT_SAM3_MODEL_PATH": "/models/sam3",
+                    "M_SAGENT_SAM3_CHECKPOINT_PATH": "/models/sam3.pt",
+                    "MSAGENT_MAX_ATTEMPTS": "5",
+                    "MSAGENT_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
+                },
+                clear=False,
+            ), patch(
+                "msagent.service.assembly.build_embedded_locator_runtime_bundle",
+                return_value=fake_locator_bundle,
+            ), patch(
+                "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
+                return_value=fake_llm_bundle,
+            ), patch(
+                "msagent.service.assembly.build_real_sam3_adapter_bundle",
+                side_effect=build_fake_sam_bundle,
+            ):
+                assembly = build_default_cli_service()
+                try:
+                    result = assembly.service.run(
+                        CLIRequest(
+                            image_path=str(image_path),
+                            query_text="the red cup",
+                        )
+                    )
+                finally:
+                    assembly.close()
+
+        self.assertEqual(result.task.runtime.max_attempts, 5)
+
+    def test_default_cli_service_rejects_real_llm_without_qwen_model_path(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.service.enable_real_llm = True
+            locator_adapter, _, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
+
+            with self.assertRaisesRegex(ValueError, "qwen_model_path"):
+                build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    sam_adapter=sam_adapter,
+                )
 
     def test_default_cli_service_reuses_locator_backbone_provider_for_real_llm(self) -> None:
-        settings = MSAgentSettings()
-        settings.service.enable_real_llm = True
-        settings.model_paths.qwen_model_path = "/models/qwen"
-        settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
-        settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.service.enable_real_llm = True
+            settings.model_paths.qwen_model_path = "/models/qwen"
+            settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
+            settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+            _, _, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-        fake_runtime_bundle = FakeEmbeddedLocatorRuntimeBundle()
-        fake_llm_bundle = FakeRealLLMAdapterBundle()
-        with patch(
-            "msagent.service.assembly.build_embedded_locator_runtime_bundle",
-            return_value=fake_runtime_bundle,
-        ), patch(
-            "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
-            return_value=fake_llm_bundle,
-        ) as build_llm_bundle:
-            assembly = build_default_cli_service(settings)
-            try:
-                pass
-            finally:
-                assembly.close()
+            fake_runtime_bundle = FakeEmbeddedLocatorRuntimeBundle()
+            fake_llm_bundle = FakeRealLLMAdapterBundle()
+            with patch(
+                "msagent.service.assembly.build_embedded_locator_runtime_bundle",
+                return_value=fake_runtime_bundle,
+            ), patch(
+                "msagent.service.assembly.build_real_qwen_llm_adapter_bundle",
+                return_value=fake_llm_bundle,
+            ) as build_llm_bundle:
+                assembly = build_default_cli_service(
+                    settings,
+                    sam_adapter=sam_adapter,
+                )
+                try:
+                    pass
+                finally:
+                    assembly.close()
 
         self.assertIs(
             build_llm_bundle.call_args.kwargs["shared_backbone_provider"],
@@ -239,12 +370,15 @@ class ServiceAssemblyTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.model_paths.sam_model_path = "/models/sam3"
             settings.model_paths.sam_checkpoint_path = "/models/sam3.pt"
+            locator_adapter, llm_adapter, _ = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle_holder: dict[str, FakeRealSAMAdapterBundle] = {}
 
@@ -257,7 +391,11 @@ class ServiceAssemblyTests(unittest.TestCase):
                 "msagent.service.assembly.build_real_sam3_adapter_bundle",
                 side_effect=build_fake_bundle,
             ) as build_bundle:
-                assembly = build_default_cli_service(settings)
+                assembly = build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    llm_adapter=llm_adapter,
+                )
                 try:
                     result = assembly.service.run(
                         CLIRequest(
@@ -274,38 +412,46 @@ class ServiceAssemblyTests(unittest.TestCase):
         self.assertIs(assembly.sam_bundle, fake_bundle)
         self.assertEqual(
             assembly.diagnostics,
-            ["embedded_locator_runtime=disabled", "sam_runtime=enabled"],
+            ["embedded_locator_runtime=custom", "sam_runtime=enabled"],
         )
         self.assertEqual(fake_bundle.sam_adapter.segment_calls, 1)
         self.assertTrue(fake_bundle.closed)
         self.assertIs(result.task.runtime.status, TaskStatus.SUCCEEDED)
 
-    def test_default_cli_service_falls_back_to_mock_sam_when_runtime_is_unconfigured(
+    def test_default_cli_service_rejects_unconfigured_sam_runtime(
         self,
     ) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, _ = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-            assembly = build_default_cli_service(settings)
-            try:
-                self.assertIsInstance(assembly.sam_adapter, MockSAMAdapter)
-                self.assertIsNone(assembly.sam_bundle)
-                self.assertEqual(
-                    assembly.diagnostics,
-                    ["embedded_locator_runtime=disabled", "sam_runtime=disabled"],
+            with self.assertRaisesRegex(ValueError, "SAM3 runtime is not configured"):
+                build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    llm_adapter=llm_adapter,
                 )
-            finally:
-                assembly.close()
 
     def test_default_cli_service_rejects_partial_real_sam_runtime_configuration(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.model_paths.sam_model_path = "/models/sam3"
+            locator_adapter, llm_adapter, _ = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             with self.assertRaisesRegex(ValueError, "partial"):
-                build_default_cli_service(settings)
+                build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    llm_adapter=llm_adapter,
+                )
 
     def test_model_path_config_detects_real_sam_runtime_states(self) -> None:
         empty_config = ModelPathConfig()
@@ -326,74 +472,100 @@ class ServiceAssemblyTests(unittest.TestCase):
     def test_default_cli_service_closes_real_sam_bundle_on_downstream_assembly_failure(
         self,
     ) -> None:
-        settings = MSAgentSettings()
-        settings.service.enable_real_llm = True
-        settings.model_paths.sam_model_path = "/models/sam3"
-        settings.model_paths.sam_checkpoint_path = "/models/sam3.pt"
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.service.enable_real_llm = True
+            settings.model_paths.sam_model_path = "/models/sam3"
+            settings.model_paths.sam_checkpoint_path = "/models/sam3.pt"
+            locator_adapter, _, _ = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-        fake_bundle_holder: dict[str, FakeRealSAMAdapterBundle] = {}
+            fake_bundle_holder: dict[str, FakeRealSAMAdapterBundle] = {}
 
-        def build_fake_bundle(*_args, artifact_store, **_kwargs):
-            fake_bundle = FakeRealSAMAdapterBundle(artifact_store)
-            fake_bundle_holder["bundle"] = fake_bundle
-            return fake_bundle
+            def build_fake_bundle(*_args, artifact_store, **_kwargs):
+                fake_bundle = FakeRealSAMAdapterBundle(artifact_store)
+                fake_bundle_holder["bundle"] = fake_bundle
+                return fake_bundle
 
-        with patch(
-            "msagent.service.assembly.build_real_sam3_adapter_bundle",
-            side_effect=build_fake_bundle,
-        ):
-            with self.assertRaisesRegex(ValueError, "qwen_model_path"):
-                build_default_cli_service(settings)
+            with patch(
+                "msagent.service.assembly.build_real_sam3_adapter_bundle",
+                side_effect=build_fake_bundle,
+            ):
+                with self.assertRaisesRegex(ValueError, "qwen_model_path"):
+                    build_default_cli_service(
+                        settings,
+                        locator_adapter=locator_adapter,
+                    )
 
-        self.assertTrue(fake_bundle_holder["bundle"].closed)
+            self.assertTrue(fake_bundle_holder["bundle"].closed)
 
     def test_default_cli_service_passes_optional_sam_bpe_path_to_real_builder(self) -> None:
-        settings = MSAgentSettings()
-        settings.model_paths.sam_model_path = "/models/sam3"
-        settings.model_paths.sam_checkpoint_path = "/models/sam3.pt"
-        settings.model_paths.sam_bpe_path = "/models/assets/custom_bpe.txt.gz"
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings = MSAgentSettings()
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            settings.model_paths.sam_model_path = "/models/sam3"
+            settings.model_paths.sam_checkpoint_path = "/models/sam3.pt"
+            settings.model_paths.sam_bpe_path = "/models/assets/custom_bpe.txt.gz"
+            locator_adapter, llm_adapter, _ = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-        fake_bundle_holder: dict[str, FakeRealSAMAdapterBundle] = {}
+            fake_bundle_holder: dict[str, FakeRealSAMAdapterBundle] = {}
 
-        def build_fake_bundle(config, *, artifact_store):
-            fake_bundle_holder["config"] = config
-            fake_bundle = FakeRealSAMAdapterBundle(artifact_store)
-            fake_bundle_holder["bundle"] = fake_bundle
-            return fake_bundle
+            def build_fake_bundle(config, *, artifact_store):
+                fake_bundle_holder["config"] = config
+                fake_bundle = FakeRealSAMAdapterBundle(artifact_store)
+                fake_bundle_holder["bundle"] = fake_bundle
+                return fake_bundle
 
-        with patch(
-            "msagent.service.assembly.build_real_sam3_adapter_bundle",
-            side_effect=build_fake_bundle,
-        ):
-            assembly = build_default_cli_service(settings)
-            try:
-                pass
-            finally:
-                assembly.close()
+            with patch(
+                "msagent.service.assembly.build_real_sam3_adapter_bundle",
+                side_effect=build_fake_bundle,
+            ):
+                assembly = build_default_cli_service(
+                    settings,
+                    locator_adapter=locator_adapter,
+                    llm_adapter=llm_adapter,
+                )
+                try:
+                    pass
+                finally:
+                    assembly.close()
 
-        self.assertEqual(
-            fake_bundle_holder["config"].bpe_path,
-            "/models/assets/custom_bpe.txt.gz",
-        )
+            self.assertEqual(
+                fake_bundle_holder["config"].bpe_path,
+                "/models/assets/custom_bpe.txt.gz",
+            )
 
     def test_cli_service_assembly_run_closes_runtime_bundle_on_success(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.model_paths.qwen_model_path = "/models/qwen"
             settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ):
-                assembly = build_default_cli_service(settings)
+                assembly = build_default_cli_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 result = assembly.run(
                     CLIRequest(
                         image_path=str(image_path),
@@ -408,13 +580,21 @@ class ServiceAssemblyTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
             report_dir = tmp_path / "report-output"
 
             settings = MSAgentSettings()
             settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
-            assembly = build_default_cli_service(settings)
+            assembly = build_default_cli_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
             result = assembly.run(
                 CLIRequest(
                     image_path=str(image_path),
@@ -431,18 +611,26 @@ class ServiceAssemblyTests(unittest.TestCase):
 
     def test_cli_service_assembly_run_closes_runtime_bundle_on_failure(self) -> None:
         with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
             settings = MSAgentSettings()
-            settings.runtime.artifact_root = str(Path(tmp_dir) / "artifacts")
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
             settings.model_paths.qwen_model_path = "/models/qwen"
             settings.model_paths.embedded_locator_adapter_path = "/models/locator.ckpt"
             settings.model_paths.embedded_locator_config_path = "/models/runtime.json"
+            _, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
 
             fake_bundle = FakeEmbeddedLocatorRuntimeBundle()
             with patch(
                 "msagent.service.assembly.build_embedded_locator_runtime_bundle",
                 return_value=fake_bundle,
             ):
-                assembly = build_default_cli_service(settings)
+                assembly = build_default_cli_service(
+                    settings,
+                    llm_adapter=llm_adapter,
+                    sam_adapter=sam_adapter,
+                )
                 with patch.object(
                     assembly.service,
                     "run",
@@ -451,7 +639,7 @@ class ServiceAssemblyTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "boom"):
                         assembly.run(
                             CLIRequest(
-                                image_path=str(Path(tmp_dir) / "input.png"),
+                                image_path=str(tmp_path / "input.png"),
                                 query_text="the red cup",
                             )
                         )
@@ -464,12 +652,24 @@ class ServiceAssemblyTests(unittest.TestCase):
         settings = MSAgentSettings()
         settings.runtime.default_route = ProposalRoute.LOCATE
 
-        assembly = build_default_cli_service(settings)
-        try:
-            retry_policy = assembly.service.orchestrator.dependencies.retry_policy
-            self.assertIs(retry_policy.default_route, ProposalRoute.LOCATE)
-        finally:
-            assembly.close()
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            settings.runtime.artifact_root = str(tmp_path / "artifacts")
+            locator_adapter, llm_adapter, sam_adapter = make_deterministic_service_adapters(
+                tmp_path / "artifacts"
+            )
+
+            assembly = build_default_cli_service(
+                settings,
+                locator_adapter=locator_adapter,
+                llm_adapter=llm_adapter,
+                sam_adapter=sam_adapter,
+            )
+            try:
+                retry_policy = assembly.service.orchestrator.dependencies.retry_policy
+                self.assertIs(retry_policy.default_route, ProposalRoute.LOCATE)
+            finally:
+                assembly.close()
 
     def test_default_cli_service_rejects_non_locate_default_route(self) -> None:
         settings = MSAgentSettings()

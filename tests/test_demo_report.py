@@ -26,7 +26,7 @@ class DemoReportTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
             cli_service, store = build_cli_service(tmp_path / "artifacts")
 
             result = cli_service.run(
@@ -60,7 +60,7 @@ class DemoReportTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
             cli_service, store = build_cli_service(tmp_path / "artifacts")
 
             result = cli_service.run(

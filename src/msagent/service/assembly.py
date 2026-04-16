@@ -6,11 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from msagent.core.config.settings import MSAgentSettings
-from msagent.core.contracts.types import EvaluationVerdict, ProposalRoute
+from msagent.core.contracts.types import ProposalRoute
 from msagent.core.policies.retry_policy import RetryPolicy
 from msagent.infra.adapters import LLMAdapter, LocatorAdapter, SAMAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
-from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
 from msagent.infra.qwen_llm_adapter import (
     RealQwenLLMAdapterBundle,
     RealQwenLLMAdapterConfig,
@@ -121,6 +120,7 @@ class APIServiceAssembly:
     artifact_store: LocalFileArtifactStore
     host: str
     port: int
+    enable_debug_features: bool = False
     diagnostics: list[str] = field(default_factory=list)
     _runtime_bundle: EmbeddedLocatorRuntimeBundle | None = None
     _llm_bundle: RealQwenLLMAdapterBundle | None = None
@@ -133,7 +133,11 @@ class APIServiceAssembly:
 
     def create_app(self) -> object:
         """按需创建 FastAPI app。"""
-        return create_fastapi_app(self.handler, on_shutdown=self.close)
+        return create_fastapi_app(
+            self.handler,
+            on_shutdown=self.close,
+            enable_debug_features=self.enable_debug_features,
+        )
 
     def close(self) -> None:
         if self._closed:
@@ -150,19 +154,24 @@ class APIServiceAssembly:
 def build_default_cli_service(
     settings: MSAgentSettings | None = None,
     *,
+    locator_adapter: LocatorAdapter | None = None,
     llm_adapter: LLMAdapter | None = None,
     sam_adapter: SAMAdapter | None = None,
 ) -> CLIServiceAssembly:
-    """构造默认 CLI service，并在配置完整时接入真实 locator / SAM。"""
-    resolved_settings = settings or MSAgentSettings()
+    """构造默认 CLI service。"""
+    resolved_settings = settings or MSAgentSettings.from_env()
     core = _build_default_core_assembly(
         resolved_settings,
+        locator_adapter=locator_adapter,
         llm_adapter=llm_adapter,
         sam_adapter=sam_adapter,
         caller_name="build_default_cli_service",
     )
     return CLIServiceAssembly(
-        service=CLIService(orchestrator=core.orchestrator),
+        service=CLIService(
+            orchestrator=core.orchestrator,
+            default_max_attempts=resolved_settings.runtime.max_attempts,
+        ),
         artifact_store=core.artifact_store,
         locator_adapter=core.locator_adapter,
         llm_adapter=core.llm_adapter,
@@ -177,11 +186,12 @@ def build_default_cli_service(
 def build_default_api_service(
     settings: MSAgentSettings | None = None,
     *,
+    locator_adapter: LocatorAdapter | None = None,
     llm_adapter: LLMAdapter | None = None,
     sam_adapter: SAMAdapter | None = None,
 ) -> APIServiceAssembly:
     """构造默认 API service 与 transport handler。"""
-    resolved_settings = settings or MSAgentSettings()
+    resolved_settings = settings or MSAgentSettings.from_env()
     if not resolved_settings.service.enable_api:
         raise ValueError(
             "build_default_api_service requires service.enable_api=True."
@@ -189,17 +199,24 @@ def build_default_api_service(
 
     core = _build_default_core_assembly(
         resolved_settings,
+        locator_adapter=locator_adapter,
         llm_adapter=llm_adapter,
         sam_adapter=sam_adapter,
         caller_name="build_default_api_service",
     )
-    service = APIService(orchestrator=core.orchestrator)
+    service = APIService(
+        orchestrator=core.orchestrator,
+        artifact_store=core.artifact_store,
+        include_debug_report=resolved_settings.service.enable_debug_features,
+        default_max_attempts=resolved_settings.runtime.max_attempts,
+    )
     return APIServiceAssembly(
         service=service,
         handler=APIHandler(service=service),
         artifact_store=core.artifact_store,
         host=resolved_settings.service.host,
         port=resolved_settings.service.port,
+        enable_debug_features=resolved_settings.service.enable_debug_features,
         diagnostics=core.diagnostics,
         _runtime_bundle=core.runtime_bundle,
         _llm_bundle=core.llm_bundle,
@@ -210,6 +227,7 @@ def build_default_api_service(
 def _build_default_core_assembly(
     settings: MSAgentSettings,
     *,
+    locator_adapter: LocatorAdapter | None,
     llm_adapter: LLMAdapter | None,
     sam_adapter: SAMAdapter | None,
     caller_name: str,
@@ -221,7 +239,10 @@ def _build_default_core_assembly(
         )
 
     artifact_store = LocalFileArtifactStore(settings.runtime.artifact_root)
-    locator_adapter, runtime_bundle, diagnostics = _build_default_locator_adapter(settings)
+    locator, runtime_bundle, diagnostics = _build_default_locator_adapter(
+        settings,
+        locator_adapter=locator_adapter,
+    )
     llm_bundle: RealQwenLLMAdapterBundle | None = None
     sam_bundle: RealSAM3AdapterBundle | None = None
     try:
@@ -245,7 +266,7 @@ def _build_default_core_assembly(
                 proposal_engine_module=DefaultProposalEngineModule(
                     route_handlers={
                         ProposalRoute.LOCATE: LocateProposalRouteHandler(
-                            locator_adapter=locator_adapter
+                            locator_adapter=locator
                         )
                     },
                     artifact_store=artifact_store,
@@ -274,7 +295,7 @@ def _build_default_core_assembly(
         raise
     return _DefaultCoreAssembly(
         artifact_store=artifact_store,
-        locator_adapter=locator_adapter,
+        locator_adapter=locator,
         llm_adapter=llm,
         sam_adapter=sam,
         runtime_bundle=runtime_bundle,
@@ -287,7 +308,12 @@ def _build_default_core_assembly(
 
 def _build_default_locator_adapter(
     settings: MSAgentSettings,
+    *,
+    locator_adapter: LocatorAdapter | None,
 ) -> tuple[LocatorAdapter, EmbeddedLocatorRuntimeBundle | None, list[str]]:
+    if locator_adapter is not None:
+        return locator_adapter, None, ["embedded_locator_runtime=custom"]
+
     model_paths = settings.model_paths
     if model_paths.has_partial_embedded_locator_runtime():
         raise ValueError(
@@ -297,13 +323,10 @@ def _build_default_locator_adapter(
         )
 
     if not model_paths.has_embedded_locator_runtime():
-        return (
-            MockLocatorAdapter(
-                backend_name="mock-locator",
-                model_path=model_paths.locator_model_path,
-            ),
-            None,
-            ["embedded_locator_runtime=disabled"],
+        raise ValueError(
+            "Embedded locator runtime is not configured; qwen_model_path, "
+            "embedded_locator_adapter_path, and embedded_locator_config_path "
+            "must be provided together, or pass locator_adapter explicitly."
         )
 
     runtime_bundle = build_embedded_locator_runtime_bundle(
@@ -337,15 +360,10 @@ def _build_default_sam_adapter(
         )
 
     if not model_paths.has_real_sam_runtime():
-        return (
-            MockSAMAdapter(
-                backend_name="mock-sam",
-                artifact_store=artifact_store,
-                model_path=model_paths.sam_model_path,
-                checkpoint_path=model_paths.sam_checkpoint_path,
-            ),
-            None,
-            ["sam_runtime=disabled"],
+        raise ValueError(
+            "SAM3 runtime is not configured; sam_model_path and "
+            "sam_checkpoint_path must be provided together, or pass "
+            "sam_adapter explicitly."
         )
 
     sam_bundle = build_real_sam3_adapter_bundle(
@@ -369,12 +387,9 @@ def _build_default_llm_adapter(
         return llm_adapter, None
 
     if not settings.service.enable_real_llm:
-        return (
-            MockLLMAdapter(
-                backend_name="mock-llm",
-                evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
-            ),
-            None,
+        raise ValueError(
+            "Real LLM adapter is disabled; set service.enable_real_llm=True "
+            "or pass llm_adapter explicitly."
         )
 
     model_path = settings.model_paths.qwen_model_path

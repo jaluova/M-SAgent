@@ -307,3 +307,71 @@ class RealQwenLLMAdapterTests(unittest.TestCase):
                     prompt_package=prompt,
                 )
             )
+
+    def test_evaluation_prompt_includes_mask_quality_context(self) -> None:
+        captured_prompts: list[str] = []
+
+        def _capture_prompt(prompt_text: str) -> str:
+            captured_prompts.append(prompt_text)
+            return """
+            {
+              "verdict": "review",
+              "summary": "needs more evidence",
+              "failure_type": "partial_mask",
+              "confidence": 0.42,
+              "retry_hints": ["retry_with_same_route"]
+            }
+            """
+
+        adapter = RealQwenLLMAdapter(
+            backend_name="real-qwen-test",
+            model_path="/models/qwen",
+            backbone_provider=FakeProvider(),
+            generation_override=_capture_prompt,
+        )
+        mask_ref = ArtifactRef(
+            artifact_id="mask-4",
+            artifact_type=ArtifactKind.MASK,
+            attempt_index=1,
+        )
+        segmentation = SegmentationResult(
+            segmentation_id="seg-6",
+            status=SegmentationStatus.READY,
+            result_summary="one candidate",
+            candidates=[
+                SegmentationCandidate(
+                    candidate_id="candidate-4",
+                    mask_ref=mask_ref,
+                    score=0.89,
+                )
+            ],
+            primary_candidate_id="candidate-4",
+        )
+        prompt = PromptPackage(
+            package_id="pkg-6",
+            package_version="v1",
+            text_prompts=PromptTextBundle(normalized_text="the banana"),
+            spatial_prompts=SpatialPromptBundle(),
+            metadata=PromptMetadata(produced_from_route=ProposalRoute.LOCATE),
+        )
+
+        adapter.run_evaluation(
+            EvaluationAdapterRequest(
+                task_id="task-8",
+                raw_query="the banana",
+                segmentation=segmentation,
+                prompt_package=prompt,
+                primary_mask_summary="primary mask stats: pixel_area=16, coverage_ratio=0.00001600",
+                mask_quality_warnings=[
+                    "primary mask is near-empty relative to the image"
+                ],
+            )
+        )
+
+        self.assertEqual(len(captured_prompts), 1)
+        prompt_text = captured_prompts[0]
+        self.assertIn("Primary mask summary", prompt_text)
+        self.assertIn("pixel_area=16", prompt_text)
+        self.assertIn("Mask quality warnings", prompt_text)
+        self.assertIn("near-empty", prompt_text)
+        self.assertIn("Never accept a candidate", prompt_text)

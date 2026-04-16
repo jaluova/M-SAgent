@@ -20,7 +20,6 @@ from msagent.core.policies.retry_policy import RetryPolicy
 from msagent.core.task.enums import StopReason, TaskSource, TaskStage, TaskStatus
 from msagent.infra.adapters import LocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
-from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
 from msagent.modules.evaluator import LLMEvaluatorModule
 from msagent.modules.prompt_bridge import RuleBasedPromptBridgeModule
 from msagent.modules.proposal_engine import DefaultProposalEngineModule, LocateProposalRouteHandler
@@ -31,6 +30,11 @@ from msagent.core.task.models import RunTask, RunTaskIdentity, RunTaskRequest, R
 from msagent.core.task.models import RunTaskArtifacts, RunTaskRuntime
 from msagent.orchestrator.orchestrator import OrchestrationResult
 from msagent.service.api import APIRequest, APIResponse, APIService
+from tests.support.deterministic_adapters import (
+    DeterministicLLMAdapter,
+    DeterministicLocatorAdapter,
+    DeterministicSAMAdapter,
+)
 
 
 def make_task() -> RunTask:
@@ -95,7 +99,7 @@ def make_task() -> RunTask:
     )
 
 
-class EmptyLocatorAdapter(MockLocatorAdapter):
+class EmptyLocatorAdapter(DeterministicLocatorAdapter):
     def locate(self, request):
         return ProposalResult(
             proposal_id=f"{request.task_id}-proposal-empty",
@@ -118,8 +122,8 @@ def build_api_service(
     locator_adapter: LocatorAdapter | None = None,
 ) -> APIService:
     store = LocalFileArtifactStore(str(artifact_root))
-    llm_adapter = MockLLMAdapter(
-        backend_name="mock-llm",
+    llm_adapter = DeterministicLLMAdapter(
+        backend_name="deterministic-llm",
         evaluation_verdict_sequence=evaluation_sequence,
     )
     orchestrator = Orchestrator(
@@ -132,15 +136,15 @@ def build_api_service(
                 route_handlers={
                     ProposalRoute.LOCATE: LocateProposalRouteHandler(
                         locator_adapter=locator_adapter
-                        or MockLocatorAdapter(backend_name="mock-locator"),
+                        or DeterministicLocatorAdapter(backend_name="deterministic-locator"),
                     )
                 },
                 artifact_store=store,
             ),
             prompt_bridge_module=RuleBasedPromptBridgeModule(artifact_store=store),
             segmenter_module=SAMSegmenterModule(
-                sam_adapter=MockSAMAdapter(
-                    backend_name="mock-sam",
+                sam_adapter=DeterministicSAMAdapter(
+                    backend_name="deterministic-sam",
                     artifact_store=store,
                 ),
                 artifact_store=store,
@@ -193,6 +197,17 @@ class APIServiceTests(unittest.TestCase):
         self.assertEqual(task.runtime.attempt_index, 0)
         self.assertEqual(task.runtime.max_attempts, 1)
 
+    def test_build_task_uses_service_default_max_attempts_when_request_omits_it(self) -> None:
+        service = APIService(orchestrator=Mock(), default_max_attempts=5)
+        request = APIRequest(
+            image_uri="s3://bucket/input.png",
+            query_text="the red cup",
+        )
+
+        task = service.build_task(request)
+
+        self.assertEqual(task.runtime.max_attempts, 5)
+
     def test_run_is_a_thin_orchestrator_wrapper(self) -> None:
         orchestrator = Mock()
         service = APIService(orchestrator=orchestrator)
@@ -231,6 +246,34 @@ class APIServiceTests(unittest.TestCase):
                 ],
             ),
         )
+
+    def test_to_response_omits_demo_report_by_default(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = LocalFileArtifactStore(str(Path(tmp_dir) / "artifacts"))
+            service = APIService(orchestrator=Mock(), artifact_store=store)
+            task = make_task()
+
+            response = service.to_response(OrchestrationResult(task=task))
+
+        self.assertIsNone(response.report)
+
+    def test_to_response_includes_demo_report_in_debug_mode(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = LocalFileArtifactStore(str(Path(tmp_dir) / "artifacts"))
+            service = APIService(
+                orchestrator=Mock(),
+                artifact_store=store,
+                include_debug_report=True,
+            )
+            task = make_task()
+
+            response = service.to_response(OrchestrationResult(task=task))
+
+        self.assertIsNotNone(response.report)
+        assert response.report is not None
+        self.assertEqual(response.report.task_id, "api-task-fixed")
+        self.assertEqual(response.report.raw_query, "the red cup")
+        self.assertEqual(response.report.attempt_count, 0)
 
     def test_to_response_uses_safe_failure_summary_without_leaking_internal_text(self) -> None:
         service = APIService(orchestrator=Mock())

@@ -62,9 +62,8 @@ import os
 from pathlib import Path
 
 from msagent.core.config.settings import MSAgentSettings
-from msagent.core.contracts.types import EvaluationVerdict, SegmentationResult
-from msagent.infra.mock_adapters import MockLLMAdapter
-from msagent.infra.mock_artifacts import MockMask
+from msagent.core.contracts.types import SegmentationResult
+from msagent.infra.mask_artifact import MaskArtifact
 from msagent.service import build_default_cli_service
 from msagent.service.cli import CLIRequest
 
@@ -76,14 +75,9 @@ settings.model_paths.embedded_locator_config_path = os.environ["GRIDGROUND_CONFI
 settings.model_paths.embedded_locator_adapter_path = os.environ["GRIDGROUND_ADAPTER_PATH"]
 settings.model_paths.sam_model_path = os.environ["M_SAGENT_SAM3_MODEL_PATH"]
 settings.model_paths.sam_checkpoint_path = os.environ["M_SAGENT_SAM3_CHECKPOINT_PATH"]
+settings.service.enable_real_llm = True
 
-assembly = build_default_cli_service(
-    settings,
-    llm_adapter=MockLLMAdapter(
-        backend_name="mock-llm-real-cli-demo",
-        evaluation_verdict_sequence=(EvaluationVerdict.ACCEPT,),
-    ),
-)
+assembly = build_default_cli_service(settings)
 
 result = assembly.run(
     CLIRequest(
@@ -103,7 +97,7 @@ segmentation = (
     else None
 )
 mask_payload = (
-    assembly.artifact_store.load_artifact(mask_ref, MockMask)
+    assembly.artifact_store.load_artifact(mask_ref, MaskArtifact)
     if mask_ref is not None
     else None
 )

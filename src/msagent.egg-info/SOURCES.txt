@@ -30,8 +30,7 @@ src/msagent/infra/adapters.py
 src/msagent/infra/backbones.py
 src/msagent/infra/embedded_locator.py
 src/msagent/infra/local_artifact_store.py
-src/msagent/infra/mock_adapters.py
-src/msagent/infra/mock_artifacts.py
+src/msagent/infra/mask_artifact.py
 src/msagent/infra/runtime/__init__.py
 src/msagent/infra/runtime/embedded_gridground_adapter.py
 src/msagent/infra/runtime/factory.py

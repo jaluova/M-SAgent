@@ -89,21 +89,10 @@ class EmbeddedLocatorAdapter(LocatorAdapter):
             matched_clues=self._collect_matched_clues(request),
             region_box=prediction.coarse_box,
             positive_point_hints=positive_point_hints,
-            rationale=(
-                f"Embedded runtime '{prediction.runtime_name}' produced "
-                f"{len(positive_point_hints)} point priors."
-            ),
+            rationale=f"Embedded locator produced {len(positive_point_hints)} point priors.",
             limitations=list(prediction.limitations),
         )
-        diagnostics = list(prediction.diagnostics)
-        if prediction.metadata:
-            diagnostics.append(
-                "runtime_metadata="
-                + ", ".join(
-                    f"{key}={value}"
-                    for key, value in sorted(prediction.metadata.items())
-                )
-            )
+        diagnostics = self._sanitize_prediction_diagnostics(prediction.diagnostics)
 
         bridge_hints = [
             ProposalBridgeHint(hint_type=hint.hint_type, reason=hint.reason)
@@ -173,4 +162,20 @@ class EmbeddedLocatorAdapter(LocatorAdapter):
             sanitized.append("reason=no_points_after_runtime_filter")
         else:
             sanitized.append("reason=no_usable_spatial_prior")
+        return sanitized
+
+    def _sanitize_prediction_diagnostics(self, diagnostics: list[str]) -> list[str]:
+        sanitized: list[str] = []
+        for message in diagnostics:
+            normalized = message.strip()
+            if not normalized:
+                continue
+            if normalized.startswith("selected_k="):
+                sanitized.append(normalized)
+                continue
+            if normalized.startswith("embedded_locator."):
+                sanitized.append(normalized)
+                continue
+            if normalized.startswith("reason="):
+                sanitized.append(normalized)
         return sanitized

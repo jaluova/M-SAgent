@@ -12,7 +12,16 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from msagent.core.contracts.common import ArtifactKind, ArtifactRef
-from msagent.core.contracts.types import EvaluationVerdict, ProposalRoute, QueryUnderstandingResult
+from msagent.core.contracts.types import (
+    EvaluationResult,
+    EvaluationVerdict,
+    FailureType,
+    ProposalRoute,
+    QueryUnderstandingResult,
+    SegmentationCandidate,
+    SegmentationResult,
+    SegmentationStatus,
+)
 from msagent.core.contracts.types import (
     ImplicitnessLevel,
     NormalizedBox,
@@ -28,9 +37,8 @@ from msagent.core.policies.retry_policy import RetryPolicy
 from msagent.core.task.enums import StopReason, TaskStage, TaskStatus
 from msagent.infra.adapters import LocatorAdapter
 from msagent.infra.local_artifact_store import LocalFileArtifactStore
-from msagent.infra.mock_adapters import MockLLMAdapter, MockLocatorAdapter, MockSAMAdapter
-from msagent.infra.mock_artifacts import MockMask
-from msagent.modules.evaluator import LLMEvaluatorModule
+from msagent.infra.mask_artifact import MaskArtifact
+from msagent.modules.evaluator import EvaluatorModuleInput, LLMEvaluatorModule
 from msagent.modules.prompt_bridge import PromptBridgeModuleInput, RuleBasedPromptBridgeModule
 from msagent.modules.proposal_engine import DefaultProposalEngineModule, LocateProposalRouteHandler
 from msagent.modules.query_understanding import LLMQueryUnderstandingModule
@@ -38,17 +46,22 @@ from msagent.modules.segmenter import SegmenterModuleInput
 from msagent.modules.segmenter import SAMSegmenterModule
 from msagent.orchestrator.orchestrator import Orchestrator, OrchestratorDependencies
 from msagent.service.cli import CLIRequest, CLIService
+from tests.support.deterministic_adapters import (
+    DeterministicLLMAdapter,
+    DeterministicLocatorAdapter,
+    DeterministicSAMAdapter,
+)
 
 
 def build_cli_service(
     artifact_root: Path,
     evaluation_sequence: tuple[EvaluationVerdict, ...] = (EvaluationVerdict.ACCEPT,),
     locator_adapter: LocatorAdapter | None = None,
-    llm_adapter: MockLLMAdapter | None = None,
+    llm_adapter: DeterministicLLMAdapter | None = None,
 ) -> tuple[CLIService, LocalFileArtifactStore]:
     store = LocalFileArtifactStore(str(artifact_root))
-    llm_adapter = llm_adapter or MockLLMAdapter(
-        backend_name="mock-llm",
+    llm_adapter = llm_adapter or DeterministicLLMAdapter(
+        backend_name="deterministic-llm",
         evaluation_verdict_sequence=evaluation_sequence,
     )
     query_module = LLMQueryUnderstandingModule(
@@ -59,15 +72,15 @@ def build_cli_service(
         route_handlers={
             ProposalRoute.LOCATE: LocateProposalRouteHandler(
                 locator_adapter=locator_adapter
-                or MockLocatorAdapter(backend_name="mock-locator"),
+                or DeterministicLocatorAdapter(backend_name="deterministic-locator"),
             )
         },
         artifact_store=store,
     )
     prompt_bridge_module = RuleBasedPromptBridgeModule(artifact_store=store)
     segmenter_module = SAMSegmenterModule(
-        sam_adapter=MockSAMAdapter(
-            backend_name="mock-sam",
+        sam_adapter=DeterministicSAMAdapter(
+            backend_name="deterministic-sam",
             artifact_store=store,
         ),
         artifact_store=store,
@@ -89,7 +102,7 @@ def build_cli_service(
     return CLIService(orchestrator=orchestrator), store
 
 
-class RecordingLLMAdapter(MockLLMAdapter):
+class RecordingLLMAdapter(DeterministicLLMAdapter):
     def __init__(self) -> None:
         super().__init__(backend_name="recording-llm")
         self.last_evaluation_request: EvaluationAdapterRequest | None = None
@@ -99,7 +112,7 @@ class RecordingLLMAdapter(MockLLMAdapter):
         return super().run_evaluation(request)
 
 
-class EmptyLocatorAdapter(MockLocatorAdapter):
+class EmptyLocatorAdapter(DeterministicLocatorAdapter):
     def locate(self, request):
         return ProposalResult(
             proposal_id=f"{request.task_id}-proposal-empty",
@@ -108,6 +121,24 @@ class EmptyLocatorAdapter(MockLocatorAdapter):
             proposal_summary="no candidate produced",
             candidates=[],
             primary_candidate_id=None,
+        )
+
+
+class AlwaysAcceptLLMAdapter(DeterministicLLMAdapter):
+    def __init__(self, *, backend_name: str) -> None:
+        super().__init__(backend_name=backend_name)
+        self.last_evaluation_request: EvaluationAdapterRequest | None = None
+
+    def run_evaluation(self, request: EvaluationAdapterRequest) -> EvaluationResult:
+        self.last_evaluation_request = request
+        primary_candidate = request.segmentation.candidates[0]
+        return EvaluationResult(
+            evaluation_id=f"{request.task_id}-evaluation-accept",
+            verdict=EvaluationVerdict.ACCEPT,
+            summary="LLM considered the candidate acceptable.",
+            accepted_candidate_id=primary_candidate.candidate_id,
+            accepted_mask_ref=primary_candidate.mask_ref,
+            confidence=0.9,
         )
 
 
@@ -155,7 +186,7 @@ class MinimalVerticalSliceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             cli_service, store = build_cli_service(tmp_path / "artifacts")
             result = cli_service.run(
@@ -182,9 +213,11 @@ class MinimalVerticalSliceTests(unittest.TestCase):
             self.assertIsNotNone(attempt.segmentation_ref)
             self.assertIsNotNone(attempt.evaluation_ref)
 
-            loaded_mask = store.load_artifact(task.result.final_mask_ref, MockMask)
-            self.assertEqual(loaded_mask.label, "mock_mask")
+            loaded_mask = store.load_artifact(task.result.final_mask_ref, MaskArtifact)
+            self.assertEqual(loaded_mask.label, "deterministic_mask")
             self.assertAlmostEqual(loaded_mask.active_box.x1, 0.2)
+            self.assertEqual(len(loaded_mask.mask_bitmap), loaded_mask.height)
+            self.assertEqual(len(loaded_mask.mask_bitmap[0]), loaded_mask.width)
 
     def test_artifact_store_roundtrip(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -200,11 +233,11 @@ class MinimalVerticalSliceTests(unittest.TestCase):
 
             self.assertEqual(loaded, payload)
             with self.assertRaises(TypeError):
-                store.load_artifact(artifact_ref, MockMask)
+                store.load_artifact(artifact_ref, MaskArtifact)
             with self.assertRaises(TypeError):
                 store.save_artifact(
                     ArtifactKind.QUERY_UNDERSTANDING_RESULT,
-                    MockMask(
+                    MaskArtifact(
                         mask_id="m-1",
                         width=1,
                         height=1,
@@ -266,13 +299,13 @@ class MinimalVerticalSliceTests(unittest.TestCase):
             self.assertIsNotNone(package.execution_hints)
             self.assertTrue(package.execution_hints.crop_to_box)
 
-    def test_mock_segmenter_accepts_points_only_prompt(self) -> None:
+    def test_deterministic_segmenter_accepts_points_only_prompt(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             store = LocalFileArtifactStore(str(tmp_path / "artifacts"))
             segmenter = SAMSegmenterModule(
-                sam_adapter=MockSAMAdapter(
-                    backend_name="mock-sam",
+                sam_adapter=DeterministicSAMAdapter(
+                    backend_name="deterministic-sam",
                     artifact_store=store,
                 ),
                 artifact_store=store,
@@ -319,7 +352,7 @@ class MinimalVerticalSliceTests(unittest.TestCase):
             result = output.primary_payload
             assert result is not None
             self.assertEqual(len(result.candidates), 1)
-            loaded_mask = store.load_artifact(result.candidates[0].mask_ref, MockMask)
+            loaded_mask = store.load_artifact(result.candidates[0].mask_ref, MaskArtifact)
             self.assertAlmostEqual(loaded_mask.active_box.x1, 0.32)
             self.assertAlmostEqual(loaded_mask.active_box.x2, 0.68)
 
@@ -327,7 +360,7 @@ class MinimalVerticalSliceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             cli_service, _ = build_cli_service(
                 tmp_path / "artifacts",
@@ -360,7 +393,7 @@ class MinimalVerticalSliceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             cli_service, _ = build_cli_service(
                 tmp_path / "artifacts",
@@ -387,7 +420,7 @@ class MinimalVerticalSliceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             image_path = tmp_path / "input.png"
-            image_path.write_bytes(b"mock-image")
+            image_path.write_bytes(b"test-image")
 
             llm_adapter = RecordingLLMAdapter()
             cli_service, _ = build_cli_service(
@@ -409,6 +442,140 @@ class MinimalVerticalSliceTests(unittest.TestCase):
                 "the red cup",
             )
             self.assertIsNotNone(llm_adapter.last_evaluation_request.proposal)
+
+    def test_evaluator_rejects_single_pixel_mask_before_accepting(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            store = LocalFileArtifactStore(str(tmp_path / "artifacts"))
+            llm_adapter = AlwaysAcceptLLMAdapter(backend_name="always-accept")
+            module = LLMEvaluatorModule(
+                llm_adapter=llm_adapter,
+                artifact_store=store,
+            )
+            mask_ref = store.save_artifact(
+                ArtifactKind.MASK,
+                MaskArtifact(
+                    mask_id="mask-single-pixel",
+                    width=1000,
+                    height=1000,
+                    active_box=NormalizedBox(x1=0.0, y1=0.0031, x2=0.0020, y2=0.0061),
+                    mask_bitmap=[],
+                    active_points=[(0, 1)],
+                    pixel_area=1,
+                ),
+            )
+            segmentation = SegmentationResult(
+                segmentation_id="seg-single-pixel",
+                status=SegmentationStatus.READY,
+                result_summary="one candidate",
+                candidates=[
+                    SegmentationCandidate(
+                        candidate_id="candidate-1",
+                        mask_ref=mask_ref,
+                        score=0.82,
+                    )
+                ],
+                primary_candidate_id="candidate-1",
+            )
+            prompt = RuleBasedPromptBridgeModule(artifact_store=store).run(
+                PromptBridgeModuleInput(
+                    task_id="task-single-pixel",
+                    attempt_index=1,
+                    raw_query="the banana",
+                    understanding=make_understanding(),
+                    proposal=make_proposal(),
+                )
+            ).primary_payload
+            assert prompt is not None
+
+            output = module.run(
+                EvaluatorModuleInput(
+                    task_id="task-single-pixel",
+                    attempt_index=1,
+                    raw_query="the banana",
+                    prompt_package=prompt,
+                    segmentation=segmentation,
+                )
+            )
+
+            self.assertIsNotNone(output.primary_payload)
+            result = output.primary_payload
+            assert result is not None
+            self.assertIs(result.verdict, EvaluationVerdict.REJECT)
+            self.assertIs(result.failure_type, FailureType.PARTIAL_MASK)
+            self.assertIsNone(result.accepted_mask_ref)
+            self.assertIn("single active pixel", result.summary)
+            self.assertEqual(llm_adapter.evaluation_counter, 0)
+
+    def test_evaluator_downgrades_accept_when_mask_is_near_empty(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            store = LocalFileArtifactStore(str(tmp_path / "artifacts"))
+            llm_adapter = AlwaysAcceptLLMAdapter(backend_name="always-accept")
+            module = LLMEvaluatorModule(
+                llm_adapter=llm_adapter,
+                artifact_store=store,
+            )
+            mask_ref = store.save_artifact(
+                ArtifactKind.MASK,
+                MaskArtifact(
+                    mask_id="mask-near-empty",
+                    width=1000,
+                    height=1000,
+                    active_box=NormalizedBox(x1=0.10, y1=0.10, x2=0.12, y2=0.12),
+                    mask_bitmap=[],
+                    active_points=[(110, 110)],
+                    pixel_area=16,
+                ),
+            )
+            segmentation = SegmentationResult(
+                segmentation_id="seg-near-empty",
+                status=SegmentationStatus.READY,
+                result_summary="one candidate",
+                candidates=[
+                    SegmentationCandidate(
+                        candidate_id="candidate-1",
+                        mask_ref=mask_ref,
+                        score=0.79,
+                    )
+                ],
+                primary_candidate_id="candidate-1",
+            )
+            prompt = RuleBasedPromptBridgeModule(artifact_store=store).run(
+                PromptBridgeModuleInput(
+                    task_id="task-near-empty",
+                    attempt_index=1,
+                    raw_query="the banana",
+                    understanding=make_understanding(),
+                    proposal=make_proposal(),
+                )
+            ).primary_payload
+            assert prompt is not None
+
+            output = module.run(
+                EvaluatorModuleInput(
+                    task_id="task-near-empty",
+                    attempt_index=1,
+                    raw_query="the banana",
+                    prompt_package=prompt,
+                    segmentation=segmentation,
+                )
+            )
+
+            self.assertIsNotNone(output.primary_payload)
+            result = output.primary_payload
+            assert result is not None
+            self.assertIs(result.verdict, EvaluationVerdict.REVIEW)
+            self.assertIs(result.failure_type, FailureType.PARTIAL_MASK)
+            self.assertIsNone(result.accepted_mask_ref)
+            self.assertIn("Geometry guard requested review", result.summary)
+            self.assertIsNotNone(llm_adapter.last_evaluation_request)
+            assert llm_adapter.last_evaluation_request is not None
+            self.assertIn(
+                "pixel_area=16",
+                llm_adapter.last_evaluation_request.primary_mask_summary or "",
+            )
+            self.assertTrue(llm_adapter.last_evaluation_request.mask_quality_warnings)
 
 
 if __name__ == "__main__":

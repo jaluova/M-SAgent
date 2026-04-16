@@ -375,7 +375,6 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
 
             diagnostics = [
                 f"selected_k={len(points)}",
-                f"feature_session={context.session.session_id}",
             ]
             if not points:
                 diagnostics.append("no_points_after_runtime_filter")
@@ -383,6 +382,7 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                     runtime_name=self.runtime_name,
                     diagnostics=diagnostics,
                     metadata={
+                        "feature_session": context.session.session_id,
                         "adapter_path": self.adapter_path,
                         "config_path": self.config_path,
                         "backbone": context.backbone.backbone_name,
@@ -408,6 +408,7 @@ class EmbeddedGridGroundTrainAdapterRuntime(SharedBackboneTrainAdapterRuntime):
                 bridge_hints=bridge_hints,
                 diagnostics=diagnostics,
                 metadata={
+                    "feature_session": context.session.session_id,
                     "adapter_path": self.adapter_path,
                     "config_path": self.config_path,
                     "adapter_type": self.runtime_config.adapter_type,

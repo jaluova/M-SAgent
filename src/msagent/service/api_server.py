@@ -8,7 +8,7 @@ from msagent.service.assembly import build_default_api_service
 
 def run_default_api_server(settings: MSAgentSettings | None = None) -> None:
     """使用默认组合根启动 API 服务。"""
-    resolved_settings = settings or MSAgentSettings()
+    resolved_settings = settings or MSAgentSettings.from_env()
     if not resolved_settings.service.enable_api:
         raise ValueError("run_default_api_server requires service.enable_api=True.")
 

@@ -22,7 +22,7 @@ from msagent.infra.adapters import (
     ArtifactStore,
     LoadedArtifactT,
 )
-from msagent.infra.mock_artifacts import MockMask
+from msagent.infra.mask_artifact import MaskArtifact
 
 
 def _is_union_type(type_hint: object) -> bool:
@@ -40,7 +40,7 @@ class LocalFileArtifactStore(ArtifactStore):
         ArtifactKind.PROMPT_PACKAGE: PromptPackage,
         ArtifactKind.SEGMENTATION_RESULT: SegmentationResult,
         ArtifactKind.EVALUATION_RESULT: EvaluationResult,
-        ArtifactKind.MASK: MockMask,
+        ArtifactKind.MASK: MaskArtifact,
     }
 
     def __init__(

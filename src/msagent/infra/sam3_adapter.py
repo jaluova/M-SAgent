@@ -19,7 +19,7 @@ from msagent.core.contracts.types import (
     SegmentationStatus,
 )
 from msagent.infra.adapters import ArtifactStore, SAMAdapter
-from msagent.infra.mock_artifacts import MockMask
+from msagent.infra.mask_artifact import MaskArtifact
 
 
 @dataclass(slots=True)
@@ -215,7 +215,7 @@ class RealSAM3Adapter(SAMAdapter):
         prediction: _SAM3MaskPrediction,
         prompt_mode: str,
         candidate_index: int,
-    ) -> MockMask:
+    ) -> MaskArtifact:
         active_box = _infer_active_box(prediction.mask_bitmap)
         height = len(prediction.mask_bitmap)
         width = len(prediction.mask_bitmap[0]) if prediction.mask_bitmap else 0
@@ -229,11 +229,12 @@ class RealSAM3Adapter(SAMAdapter):
             for value in row
             if value
         )
-        return MockMask(
+        return MaskArtifact(
             mask_id=f"{request.task_id}-sam3-mask-{candidate_index}",
             width=width,
             height=height,
             active_box=active_box,
+            mask_bitmap=prediction.mask_bitmap,
             active_points=active_points,
             label="sam3_mask",
             backend_name=self.backend_name,
@@ -344,6 +345,10 @@ class _LoadedSAM3Runtime:
                 point_coords=point_coords or None,
                 point_labels=point_labels or None,
                 box=box_prompt,
+                # PromptPackage carries normalized coordinates in [0, 1].
+                # The external SAM3 interactive predictor defaults to interpreting
+                # prompts as absolute image pixels when normalize_coords=True.
+                normalize_coords=False,
                 multimask_output=multimask,
             )
             return _SAM3RuntimePrediction(

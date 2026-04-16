@@ -135,6 +135,12 @@ class RealQwenLLMAdapter(LLMAdapter):
         )
 
     def _build_evaluation_prompt(self, request: EvaluationAdapterRequest) -> str:
+        mask_summary = request.primary_mask_summary or "primary mask stats unavailable"
+        mask_warnings = (
+            "; ".join(request.mask_quality_warnings)
+            if request.mask_quality_warnings
+            else "none"
+        )
         return (
             "You are the evaluation stage of an image agent.\n"
             "Return one JSON object with keys: verdict, summary, failure_type, "
@@ -142,12 +148,16 @@ class RealQwenLLMAdapter(LLMAdapter):
             "Allowed verdict: accept, reject, review.\n"
             "Allowed failure_type: localization_error, partial_mask, wrong_instance, "
             "prompt_mismatch, or null.\n"
+            "Never accept a candidate when the supplied mask statistics indicate an "
+            "empty, single-pixel, or near-empty mask.\n"
             f"Raw query: {request.raw_query!r}\n"
             f"Prompt normalized text: {request.prompt_package.text_prompts.normalized_text!r}\n"
             f"Segmentation status: {request.segmentation.status.value!r}\n"
             f"Segmentation summary: {request.segmentation.result_summary!r}\n"
             f"Candidate count: {len(request.segmentation.candidates)}\n"
             f"Primary candidate id: {(request.segmentation.primary_candidate_id or '')!r}\n"
+            f"Primary mask summary: {mask_summary!r}\n"
+            f"Mask quality warnings: {mask_warnings!r}\n"
             "Respond with JSON only."
         )
 

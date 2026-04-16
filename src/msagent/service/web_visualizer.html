@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M-SAgent Visualizer</title>
+    <style>
+      :root {
+        --bg: #f2eee7;
+        --paper: rgba(255, 251, 245, 0.94);
+        --paper-strong: #fffdf9;
+        --ink: #1f2430;
+        --muted: #677083;
+        --line: rgba(31, 36, 48, 0.11);
+        --accent: #c45a1c;
+        --accent-soft: #efb892;
+        --teal: #1b7d75;
+        --rose: #b55050;
+        --gold: #bb8a23;
+        --shadow: 0 22px 60px rgba(63, 46, 24, 0.12);
+        --radius-lg: 24px;
+        --radius-md: 18px;
+        --radius-sm: 14px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB",
+          "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(196, 90, 28, 0.18), transparent 22%),
+          radial-gradient(circle at 86% 10%, rgba(27, 125, 117, 0.14), transparent 20%),
+          linear-gradient(165deg, #f7f2ea 0%, #f2ece4 46%, #ece5db 100%);
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .page {
+        width: min(1380px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 20px 0 32px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 18px;
+        padding: 24px;
+        border-radius: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        background:
+          linear-gradient(145deg, rgba(255, 253, 249, 0.95), rgba(249, 244, 237, 0.88)),
+          var(--paper-strong);
+        box-shadow: var(--shadow);
+      }
+
+      .hero h1,
+      .hero p,
+      .panel h2,
+      .panel h3 {
+        margin: 0;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 7px 12px;
+        border-radius: 999px;
+        background: rgba(31, 36, 48, 0.06);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .hero h1 {
+        margin-top: 16px;
+        font-size: clamp(32px, 4vw, 52px);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+      }
+
+      .hero p {
+        margin-top: 14px;
+        color: var(--muted);
+        line-height: 1.75;
+        max-width: 58ch;
+      }
+
+      .hero-metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 22px;
+      }
+
+      .metric {
+        padding: 16px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 26px;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .hero-card {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 22px;
+        border-radius: 24px;
+        border: 1px solid rgba(27, 125, 117, 0.16);
+        background:
+          linear-gradient(180deg, rgba(27, 125, 117, 0.08), rgba(27, 125, 117, 0.02)),
+          var(--paper);
+      }
+
+      .hero-card ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        line-height: 1.75;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 360px minmax(0, 1fr);
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .panel {
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(255, 255, 255, 0.62);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .panel h2 {
+        font-size: 24px;
+        letter-spacing: -0.03em;
+      }
+
+      .panel-subtitle {
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 14px;
+      }
+
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(31, 36, 48, 0.12);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--ink);
+      }
+
+      textarea {
+        min-height: 88px;
+        resize: vertical;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+        padding: 12px 16px;
+        border-radius: 14px;
+        transition: transform 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-primary {
+        color: white;
+        background: linear-gradient(135deg, var(--accent), #dc7b3c);
+        box-shadow: 0 12px 28px rgba(196, 90, 28, 0.22);
+      }
+
+      .btn-secondary {
+        color: var(--ink);
+        background: rgba(31, 36, 48, 0.07);
+      }
+
+      .cases {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .case-card,
+      .history-card,
+      .attempt-card,
+      .summary-card,
+      .image-card {
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .case-card {
+        padding: 14px;
+      }
+
+      .case-card.active {
+        border-color: rgba(196, 90, 28, 0.36);
+        box-shadow: 0 10px 24px rgba(196, 90, 28, 0.12);
+      }
+
+      .case-title {
+        font-weight: 700;
+      }
+
+      .case-meta,
+      .soft {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 18px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .summary-card {
+        padding: 16px;
+      }
+
+      .summary-card strong {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .summary-card span {
+        display: block;
+        margin-top: 10px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .attempt-card {
+        padding: 18px;
+      }
+
+      .attempt-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 7px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(31, 36, 48, 0.06);
+        color: var(--muted);
+      }
+
+      .badge.accept {
+        background: rgba(27, 125, 117, 0.12);
+        color: #185e58;
+      }
+
+      .badge.reject {
+        background: rgba(181, 80, 80, 0.12);
+        color: #7f3434;
+      }
+
+      .attempt-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .attempt-item {
+        padding: 12px;
+        border-radius: 14px;
+        background: rgba(242, 238, 231, 0.72);
+      }
+
+      .attempt-item strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        text-transform: uppercase;
+      }
+
+      .image-card {
+        padding: 16px;
+      }
+
+      .image-card img {
+        width: 100%;
+        max-height: 340px;
+        object-fit: contain;
+        border-radius: 14px;
+        background: rgba(31, 36, 48, 0.04);
+      }
+
+      .image-fallback {
+        min-height: 220px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        background: rgba(31, 36, 48, 0.04);
+        color: var(--muted);
+        text-align: center;
+        padding: 20px;
+      }
+
+      .history {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .history-card {
+        padding: 14px;
+      }
+
+      .empty {
+        padding: 22px;
+        border-radius: 18px;
+        border: 1px dashed rgba(31, 36, 48, 0.14);
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .status-bar {
+        margin-top: 10px;
+        min-height: 22px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .hint {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-left: 4px solid var(--gold);
+        border-radius: 14px;
+        background: rgba(187, 138, 35, 0.12);
+        color: #6a5216;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      @media (max-width: 1120px) {
+        .hero,
+        .layout,
+        .workspace,
+        .summary-grid,
+        .attempt-grid,
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">M-SAgent Visualizer / V1 Debug Frontend</div>
+          <h1>测多组图片与 query，<br />把 agent 的每轮迭代直接摊开看。</h1>
+          <p>
+            这个页面面向本地研发和调试：输入图片路径与 query，连续跑多组 case，
+            每次调用都会展示结构化 attempt timeline，帮助我们快速看 query understanding、
+            proposal、prompt bridge、segmentation 和 evaluator 在每轮到底发生了什么。
+          </p>
+          <div class="hero-metrics">
+            <div class="metric">
+              <strong id="metric-cases">0</strong>
+              <span>已保存测试 case</span>
+            </div>
+            <div class="metric">
+              <strong id="metric-runs">0</strong>
+              <span>本页运行次数</span>
+            </div>
+            <div class="metric">
+              <strong id="metric-attempts">0</strong>
+              <span>最近一次总尝试数</span>
+            </div>
+          </div>
+        </div>
+        <aside class="hero-card">
+          <h2>怎么用最顺</h2>
+          <ul>
+            <li>图片路径建议填绝对路径，例如 <code>/root/autodl-tmp/.../truck.jpg</code>。</li>
+            <li>先保存几组 case，再点“顺序跑全部”，就能快速比较不同 query 的表现。</li>
+            <li>页面会优先展示过程摘要；如果图片路径可访问，也会在右侧给出原图预览。</li>
+          </ul>
+        </aside>
+      </section>
+
+      <section class="layout">
+        <aside class="stack">
+          <section class="panel">
+            <h2>Case Builder</h2>
+            <p class="panel-subtitle">
+              先把图片路径、query 和最大尝试次数填好，再保存到左侧案例列表。
+            </p>
+            <div class="stack" style="margin-top: 16px">
+              <div>
+                <label for="imagePath">图片路径</label>
+                <input id="imagePath" placeholder="/absolute/path/to/image.jpg" />
+              </div>
+              <div>
+                <label for="queryText">Query</label>
+                <textarea id="queryText" placeholder="例如：the leftmost red cup"></textarea>
+              </div>
+              <div class="row">
+                <div>
+                  <label for="maxAttempts">Max Attempts</label>
+                  <input id="maxAttempts" type="number" min="1" max="10" value="3" />
+                </div>
+                <div>
+                  <label for="caseLabel">案例标题</label>
+                  <input id="caseLabel" placeholder="可选：方便区分多组测试" />
+                </div>
+              </div>
+              <div class="button-row">
+                <button class="btn-primary" id="saveCaseBtn">保存当前 Case</button>
+                <button class="btn-secondary" id="runCurrentBtn">直接运行当前输入</button>
+                <button class="btn-secondary" id="clearFormBtn">清空表单</button>
+              </div>
+              <div class="status-bar" id="statusBar"></div>
+              <div class="hint">
+                当前前端默认走 <code>POST /tasks/run</code>。如果你切换了 real Qwen / real locator / real
+                SAM，页面不需要改，后端响应里的迭代报告会直接体现变化。
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center">
+              <div>
+                <h2>Saved Cases</h2>
+                <p class="panel-subtitle">适合批量跑多组 query/image。</p>
+              </div>
+              <div class="button-row">
+                <button class="btn-primary" id="runAllBtn">顺序跑全部</button>
+                <button class="btn-secondary" id="clearCasesBtn">清空列表</button>
+              </div>
+            </div>
+            <div class="cases" id="casesList" style="margin-top: 16px"></div>
+          </section>
+        </aside>
+
+        <section class="stack">
+          <section class="panel">
+            <h2>Latest Run</h2>
+            <p class="panel-subtitle">
+              最近一次任务的状态、原图预览和每轮 attempt 摘要会集中显示在这里。
+            </p>
+            <div class="workspace" style="margin-top: 18px">
+              <div class="stack">
+                <div class="summary-grid">
+                  <article class="summary-card">
+                    <strong>Task</strong>
+                    <span id="taskId">-</span>
+                  </article>
+                  <article class="summary-card">
+                    <strong>Status</strong>
+                    <span id="taskStatus">-</span>
+                  </article>
+                  <article class="summary-card">
+                    <strong>Final Verdict</strong>
+                    <span id="taskVerdict">-</span>
+                  </article>
+                  <article class="summary-card">
+                    <strong>Attempts</strong>
+                    <span id="taskAttempts">0</span>
+                  </article>
+                </div>
+                <div class="summary-card" style="padding: 18px">
+                  <strong>Summary</strong>
+                  <span id="taskSummary" style="font-size: 16px; line-height: 1.7; font-weight: 600">还没有运行任务。</span>
+                </div>
+                <div class="timeline" id="attemptTimeline">
+                  <div class="empty">运行一次任务后，这里会显示每轮 agent 迭代的过程摘要。</div>
+                </div>
+              </div>
+
+              <div class="stack">
+                <article class="image-card">
+                  <h3>Source Preview</h3>
+                  <p class="panel-subtitle" id="previewCaption" style="margin-bottom: 12px">
+                    当前没有可预览图片。
+                  </p>
+                  <img id="sourcePreview" alt="source preview" hidden />
+                  <div class="image-fallback" id="sourceFallback">
+                    请输入可读取的本地图片路径。<br />
+                    页面会通过后端预览接口尝试加载它。
+                  </div>
+                </article>
+
+                <article class="panel" style="padding: 18px">
+                  <h3>Run History</h3>
+                  <p class="panel-subtitle">保留最近几次调用，方便横向对比。</p>
+                  <div class="history" id="runHistory" style="margin-top: 14px">
+                    <div class="empty">历史记录还没有内容。</div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        savedCases: [],
+        runHistory: [],
+        running: false,
+        activeCaseId: null,
+        nextCaseId: 1,
+      };
+
+      const el = {
+        imagePath: document.getElementById("imagePath"),
+        queryText: document.getElementById("queryText"),
+        maxAttempts: document.getElementById("maxAttempts"),
+        caseLabel: document.getElementById("caseLabel"),
+        saveCaseBtn: document.getElementById("saveCaseBtn"),
+        runCurrentBtn: document.getElementById("runCurrentBtn"),
+        clearFormBtn: document.getElementById("clearFormBtn"),
+        runAllBtn: document.getElementById("runAllBtn"),
+        clearCasesBtn: document.getElementById("clearCasesBtn"),
+        casesList: document.getElementById("casesList"),
+        runHistory: document.getElementById("runHistory"),
+        statusBar: document.getElementById("statusBar"),
+        taskId: document.getElementById("taskId"),
+        taskStatus: document.getElementById("taskStatus"),
+        taskVerdict: document.getElementById("taskVerdict"),
+        taskAttempts: document.getElementById("taskAttempts"),
+        taskSummary: document.getElementById("taskSummary"),
+        attemptTimeline: document.getElementById("attemptTimeline"),
+        sourcePreview: document.getElementById("sourcePreview"),
+        sourceFallback: document.getElementById("sourceFallback"),
+        previewCaption: document.getElementById("previewCaption"),
+        metricCases: document.getElementById("metric-cases"),
+        metricRuns: document.getElementById("metric-runs"),
+        metricAttempts: document.getElementById("metric-attempts"),
+      };
+
+      function setStatus(message) {
+        el.statusBar.textContent = message;
+      }
+
+      function getDraftCase() {
+        return {
+          label: el.caseLabel.value.trim(),
+          imagePath: el.imagePath.value.trim(),
+          queryText: el.queryText.value.trim(),
+          maxAttempts: Number.parseInt(el.maxAttempts.value, 10) || 3,
+        };
+      }
+
+      function validateDraftCase(draft) {
+        if (!draft.imagePath) {
+          return "请先填写图片路径。";
+        }
+        if (!draft.queryText) {
+          return "请先填写 query。";
+        }
+        if (!Number.isFinite(draft.maxAttempts) || draft.maxAttempts < 1) {
+          return "max attempts 需要是大于等于 1 的整数。";
+        }
+        return null;
+      }
+
+      function resetForm() {
+        el.imagePath.value = "";
+        el.queryText.value = "";
+        el.maxAttempts.value = "3";
+        el.caseLabel.value = "";
+      }
+
+      function formatCaseTitle(testCase) {
+        if (testCase.label) {
+          return testCase.label;
+        }
+        return testCase.queryText.length > 30
+          ? testCase.queryText.slice(0, 30) + "..."
+          : testCase.queryText;
+      }
+
+      function updateMetrics(latestReport) {
+        el.metricCases.textContent = String(state.savedCases.length);
+        el.metricRuns.textContent = String(state.runHistory.length);
+        el.metricAttempts.textContent = String(
+          latestReport && typeof latestReport.attempt_count === "number"
+            ? latestReport.attempt_count
+            : 0,
+        );
+      }
+
+      function renderCases() {
+        el.casesList.innerHTML = "";
+        if (!state.savedCases.length) {
+          el.casesList.innerHTML =
+            '<div class="empty">还没有保存 case。先在上面填一组图片路径和 query。</div>';
+          updateMetrics(null);
+          return;
+        }
+
+        state.savedCases.forEach((testCase) => {
+          const card = document.createElement("article");
+          card.className =
+            "case-card" + (state.activeCaseId === testCase.id ? " active" : "");
+          card.innerHTML = `
+            <div class="case-title">${escapeHtml(formatCaseTitle(testCase))}</div>
+            <div class="case-meta">${escapeHtml(testCase.imagePath)}</div>
+            <div class="soft">max_attempts=${testCase.maxAttempts}</div>
+            <div class="button-row" style="margin-top: 12px">
+              <button class="btn-primary" data-action="run">运行</button>
+              <button class="btn-secondary" data-action="load">载入</button>
+              <button class="btn-secondary" data-action="delete">删除</button>
+            </div>
+          `;
+
+          card.querySelector('[data-action="run"]').addEventListener("click", () => {
+            void runCase(testCase);
+          });
+          card.querySelector('[data-action="load"]').addEventListener("click", () => {
+            loadCaseIntoForm(testCase);
+          });
+          card.querySelector('[data-action="delete"]').addEventListener("click", () => {
+            state.savedCases = state.savedCases.filter((item) => item.id !== testCase.id);
+            if (state.activeCaseId === testCase.id) {
+              state.activeCaseId = null;
+            }
+            renderCases();
+          });
+
+          el.casesList.appendChild(card);
+        });
+
+        updateMetrics(null);
+      }
+
+      function loadCaseIntoForm(testCase) {
+        el.imagePath.value = testCase.imagePath;
+        el.queryText.value = testCase.queryText;
+        el.maxAttempts.value = String(testCase.maxAttempts);
+        el.caseLabel.value = testCase.label || "";
+        state.activeCaseId = testCase.id;
+        renderCases();
+        renderPreview(testCase.imagePath);
+        setStatus("已载入案例，可以直接运行或继续修改。");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function buildPreviewUrl(imagePath) {
+        return "/debug/local-file?path=" + encodeURIComponent(imagePath);
+      }
+
+      function renderPreview(imagePath) {
+        if (!imagePath) {
+          el.sourcePreview.hidden = true;
+          el.sourceFallback.hidden = false;
+          el.previewCaption.textContent = "当前没有可预览图片。";
+          return;
+        }
+
+        el.sourcePreview.src = buildPreviewUrl(imagePath);
+        el.sourcePreview.hidden = false;
+        el.sourceFallback.hidden = true;
+        el.previewCaption.textContent = imagePath;
+        el.sourcePreview.onerror = () => {
+          el.sourcePreview.hidden = true;
+          el.sourceFallback.hidden = false;
+          el.sourceFallback.innerHTML =
+            "图片预览失败。<br />请确认路径存在并且是后端机器可读取的图片文件。";
+        };
+      }
+
+      function renderLatestRun(response, testCase) {
+        const report = response.report || null;
+        el.taskId.textContent = response.task_id || "-";
+        el.taskStatus.textContent = response.status || "-";
+        el.taskVerdict.textContent = report && report.final_verdict ? report.final_verdict : "-";
+        el.taskAttempts.textContent =
+          report && typeof report.attempt_count === "number"
+            ? String(report.attempt_count)
+            : "0";
+        el.taskSummary.textContent = response.summary || "任务已完成，但没有返回 summary。";
+        renderPreview(testCase.imagePath);
+        renderAttempts(report);
+        updateMetrics(report);
+      }
+
+      function renderAttempts(report) {
+        el.attemptTimeline.innerHTML = "";
+        if (!report || !Array.isArray(report.attempts) || !report.attempts.length) {
+          el.attemptTimeline.innerHTML =
+            '<div class="empty">这次运行没有返回 attempt 细节。</div>';
+          return;
+        }
+
+        report.attempts.forEach((attempt) => {
+          const card = document.createElement("article");
+          card.className = "attempt-card";
+          const verdictClass =
+            attempt.verdict === "accept"
+              ? "accept"
+              : attempt.verdict === "reject"
+                ? "reject"
+                : "";
+          card.innerHTML = `
+            <div class="attempt-head">
+              <div>
+                <h3>Attempt ${attempt.attempt_index}</h3>
+                <div class="soft">route=${escapeHtml(attempt.route || "-")}</div>
+              </div>
+              <div class="badge-row">
+                <span class="badge ${verdictClass}">${escapeHtml(attempt.verdict || "unknown")}</span>
+                <span class="badge">${escapeHtml(attempt.failure_type || "no failure type")}</span>
+              </div>
+            </div>
+            <div class="attempt-grid">
+              ${renderAttemptItem("Query Understanding", attempt.query_summary)}
+              ${renderAttemptItem("Proposal", attempt.proposal_summary)}
+              ${renderAttemptItem("Prompt Package", attempt.prompt_summary)}
+              ${renderAttemptItem("Segmentation", attempt.segmentation_summary)}
+              ${renderAttemptItem("Evaluation", attempt.evaluation_summary)}
+              ${renderAttemptItem(
+                "Notes",
+                Array.isArray(attempt.notes) && attempt.notes.length
+                  ? attempt.notes.join(" | ")
+                  : "无额外 notes",
+              )}
+            </div>
+          `;
+          el.attemptTimeline.appendChild(card);
+        });
+      }
+
+      function renderAttemptItem(title, value) {
+        return `
+          <div class="attempt-item">
+            <strong>${escapeHtml(title)}</strong>
+            <div>${escapeHtml(value || "暂无")}</div>
+          </div>
+        `;
+      }
+
+      function renderHistory() {
+        el.runHistory.innerHTML = "";
+        if (!state.runHistory.length) {
+          el.runHistory.innerHTML =
+            '<div class="empty">历史记录还没有内容。</div>';
+          return;
+        }
+
+        state.runHistory.slice().reverse().forEach((entry) => {
+          const card = document.createElement("article");
+          card.className = "history-card";
+          card.innerHTML = `
+            <div class="case-title">${escapeHtml(entry.title)}</div>
+            <div class="soft">${escapeHtml(entry.imagePath)}</div>
+            <div class="badge-row">
+              <span class="badge">${escapeHtml(entry.status)}</span>
+              <span class="badge ${entry.finalVerdict === "accept" ? "accept" : entry.finalVerdict === "reject" ? "reject" : ""}">
+                ${escapeHtml(entry.finalVerdict || "no verdict")}
+              </span>
+            </div>
+          `;
+          card.addEventListener("click", () => {
+            renderLatestRun(entry.response, entry.testCase);
+            setStatus("已切换到这次历史运行结果。");
+          });
+          el.runHistory.appendChild(card);
+        });
+      }
+
+      async function runCase(testCase) {
+        if (state.running) {
+          setStatus("当前已有任务在运行，请稍候。");
+          return;
+        }
+
+        state.running = true;
+        state.activeCaseId = testCase.id || null;
+        renderCases();
+        setStatus("正在运行： " + formatCaseTitle(testCase));
+
+        try {
+          const response = await fetch("/tasks/run", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              image_uri: testCase.imagePath,
+              query_text: testCase.queryText,
+              max_attempts: testCase.maxAttempts,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => null);
+            throw new Error(
+              errorPayload && errorPayload.detail
+                ? errorPayload.detail
+                : "请求失败，状态码 " + response.status,
+            );
+          }
+
+          const payload = await response.json();
+          renderLatestRun(payload, testCase);
+          state.runHistory.push({
+            id: Date.now() + Math.random(),
+            title: formatCaseTitle(testCase),
+            imagePath: testCase.imagePath,
+            status: payload.status || "unknown",
+            finalVerdict: payload.report ? payload.report.final_verdict : null,
+            response: payload,
+            testCase,
+          });
+          renderHistory();
+          setStatus("运行完成： " + formatCaseTitle(testCase));
+        } catch (error) {
+          setStatus("运行失败： " + (error instanceof Error ? error.message : String(error)));
+        } finally {
+          state.running = false;
+          renderCases();
+        }
+      }
+
+      async function runAllCases() {
+        if (!state.savedCases.length) {
+          setStatus("还没有保存 case，先新增几组再跑。");
+          return;
+        }
+        for (const testCase of state.savedCases) {
+          await runCase(testCase);
+        }
+      }
+
+      el.saveCaseBtn.addEventListener("click", () => {
+        const draft = getDraftCase();
+        const error = validateDraftCase(draft);
+        if (error) {
+          setStatus(error);
+          return;
+        }
+
+        const testCase = {
+          id: state.nextCaseId++,
+          label: draft.label,
+          imagePath: draft.imagePath,
+          queryText: draft.queryText,
+          maxAttempts: draft.maxAttempts,
+        };
+        state.savedCases.push(testCase);
+        state.activeCaseId = testCase.id;
+        renderCases();
+        renderPreview(testCase.imagePath);
+        setStatus("已保存 case： " + formatCaseTitle(testCase));
+      });
+
+      el.runCurrentBtn.addEventListener("click", () => {
+        const draft = getDraftCase();
+        const error = validateDraftCase(draft);
+        if (error) {
+          setStatus(error);
+          return;
+        }
+        const transientCase = {
+          id: null,
+          label: draft.label,
+          imagePath: draft.imagePath,
+          queryText: draft.queryText,
+          maxAttempts: draft.maxAttempts,
+        };
+        void runCase(transientCase);
+      });
+
+      el.clearFormBtn.addEventListener("click", () => {
+        resetForm();
+        renderPreview("");
+        setStatus("表单已清空。");
+      });
+
+      el.runAllBtn.addEventListener("click", () => {
+        void runAllCases();
+      });
+
+      el.clearCasesBtn.addEventListener("click", () => {
+        state.savedCases = [];
+        state.activeCaseId = null;
+        renderCases();
+        setStatus("已清空保存的 case。");
+      });
+
+      el.imagePath.addEventListener("change", () => {
+        renderPreview(el.imagePath.value.trim());
+      });
+
+      renderCases();
+      renderHistory();
+      renderPreview("");
+      setStatus("前端已就绪，可以开始添加测试 case。");
+    </script>
+  </body>
+</html>
